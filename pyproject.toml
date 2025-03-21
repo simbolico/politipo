@@ -1,7 +1,7 @@
 [project]
-name = "python-template"
+name = "politipo"
 version = "0.1.0"
-description = ""
-authors = ["Your Name <you@example.com>"]
+description = "A library for seamless type conversions between Python data structures and models."
+authors = [{ name = "Kevin Saltarelli", email = "kevinqz@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = []
