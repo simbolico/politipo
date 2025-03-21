@@ -8,6 +8,10 @@ Welcome to the official documentation for the `politipo` library! This guide pro
 
 `politipo` is a versatile Python library designed to simplify type conversions between various data structures and models. It supports seamless conversions between built-in types (e.g., `dict`), Pydantic models, SQLModel instances, SQLAlchemy models, and dataframes from Pandas and Polars. The library's primary goal is to streamline data transformations, making it easier for developers to work with diverse data formats in their applications.
 
+The library consists of two main components:
+- **TypeConverter**: Handles data conversions between different types (e.g., converting a dictionary to a Pydantic model)
+- **TypeMapper**: Maps type definitions between different libraries using a canonical type system (e.g., mapping Python's `int` to SQLAlchemy's `Integer`)
+
 ---
 
 ## Installation
@@ -26,7 +30,9 @@ pip install politipo
 
 ## Quick Start
 
-Here’s a simple example to get you up and running with `politipo`:
+### TypeConverter Example
+
+Here's a simple example to get you up and running with `TypeConverter`:
 
 ```python
 from politipo import TypeConverter
@@ -45,6 +51,29 @@ print(user)  # Output: User(id=1, name='Alice')
 
 This example converts a dictionary to a Pydantic model, demonstrating the library's core functionality.
 
+### TypeMapper Example
+
+Here's a simple example showing how to use `TypeMapper` to map types between different libraries:
+
+```python
+from politipo import TypeMapper
+import polars as pl
+from sqlalchemy import Integer
+
+# Create a mapper
+mapper = TypeMapper()
+
+# Map SQLAlchemy Integer to Polars Int64
+polars_type = mapper.map_type(Integer, 'sqlalchemy', 'polars')
+print(polars_type)  # Output: Int64
+
+# Map Python int to Pandas Int64Dtype
+pandas_type = mapper.map_type(int, 'python', 'pandas')
+print(pandas_type)  # Output: Int64Dtype()
+```
+
+This example shows how to map type definitions between SQLAlchemy, Polars, and Pandas libraries.
+
 ---
 
 ## Features
@@ -57,14 +86,18 @@ This example converts a dictionary to a Pydantic model, demonstrating the librar
 - **Dynamic Imports**: Only requires libraries necessary for the specific conversion, reducing dependency overhead.
 - **Error Handling**: Provides clear error messages for unsupported types or missing dependencies.
 - **Extensibility**: Allows advanced users to customize conversion logic.
+- **Type Mapping**: Map type definitions between different libraries through a canonical type system.
+- **Minimal Dependencies**: Each component only requires the libraries necessary for the specific operation.
 
 ---
 
 ## Usage
 
-This section provides in-depth explanations and examples of how to use `politipo` for various conversions.
+This section provides in-depth explanations and examples of how to use `politipo` for various conversions and type mappings.
 
-### Basic Conversions
+### TypeConverter Usage
+
+#### Basic Conversions
 To perform a conversion, create a `TypeConverter` instance with the source (`from_type`) and target (`to_type`) types, then call the `convert` method:
 
 ```python
@@ -72,7 +105,7 @@ converter = TypeConverter(from_type=SourceType, to_type=TargetType)
 result = converter.convert(data)
 ```
 
-### Converting to `dict`
+#### Converting to `dict`
 Convert various types (e.g., Pydantic models, SQLModel instances) to a dictionary:
 
 ```python
@@ -80,7 +113,7 @@ converter = TypeConverter(from_type=User, to_type=dict)
 user_dict = converter.convert(user_instance)  # user_instance is a User object
 ```
 
-### Converting to Pydantic Models
+#### Converting to Pydantic Models
 Convert from `dict`, other Pydantic models, SQLModel instances, SQLAlchemy models, or dataframes to a Pydantic model:
 
 ```python
@@ -88,7 +121,7 @@ converter = TypeConverter(from_type=dict, to_type=User)
 user = converter.convert({"id": 1, "name": "Alice"})
 ```
 
-### Converting to SQLModel Instances
+#### Converting to SQLModel Instances
 Convert data to SQLModel instances (requires the `sqlmodel` library):
 
 ```python
@@ -96,7 +129,7 @@ converter = TypeConverter(from_type=dict, to_type=UserSQLModel)
 user_sqlmodel = converter.convert({"id": 1, "name": "Alice"})
 ```
 
-### Converting to SQLAlchemy Models
+#### Converting to SQLAlchemy Models
 Convert data to SQLAlchemy models (requires the `sqlalchemy` library):
 
 ```python
@@ -104,7 +137,7 @@ converter = TypeConverter(from_type=dict, to_type=UserSQLAlchemy)
 user_sqlalchemy = converter.convert({"id": 1, "name": "Alice"})
 ```
 
-### Converting to DataFrames
+#### Converting to DataFrames
 Convert lists of `dict`, Pydantic models, or SQLModel instances to Pandas or Polars DataFrames:
 
 ```python
@@ -113,12 +146,78 @@ converter = TypeConverter(from_type=User, to_type=pd.DataFrame)
 df = converter.convert([user1, user2])  # user1, user2 are User instances
 ```
 
-### Collection Conversions
+#### Collection Conversions
 Convert DataFrames to lists of models:
 
 ```python
 converter = TypeConverter(from_type=pd.DataFrame, to_type=User)
 users = converter.convert(df)  # df is a Pandas DataFrame
+```
+
+### TypeMapper Usage
+
+#### Basic Type Mapping
+To map a type from one library to another, create a `TypeMapper` instance and use the `map_type` method:
+
+```python
+mapper = TypeMapper()
+target_type = mapper.map_type(source_type, from_library, to_library)
+```
+
+#### Mapping Python Types
+Map between Python built-in types and other libraries:
+
+```python
+# Map Python int to SQLAlchemy Integer
+sqlalchemy_type = mapper.map_type(int, 'python', 'sqlalchemy')
+# Import needed only when using the result
+from sqlalchemy import Integer
+assert sqlalchemy_type is Integer
+```
+
+#### Mapping SQLAlchemy Types
+Map SQLAlchemy types to other libraries:
+
+```python
+from sqlalchemy import String
+# Map SQLAlchemy String to Polars Utf8
+polars_type = mapper.map_type(String, 'sqlalchemy', 'polars')
+# Import needed only when using the result
+import polars as pl
+assert polars_type is pl.Utf8
+```
+
+#### Mapping Pandas Types
+Map Pandas types to other libraries:
+
+```python
+import pandas as pd
+# Map Pandas StringDtype to Python str
+python_type = mapper.map_type(pd.StringDtype(), 'pandas', 'python')
+assert python_type is str
+```
+
+#### Mapping Polars Types
+Map Polars types to other libraries:
+
+```python
+import polars as pl
+# Map Polars Boolean to SQLAlchemy Boolean
+sqlalchemy_type = mapper.map_type(pl.Boolean, 'polars', 'sqlalchemy')
+# Import needed only when using the result
+from sqlalchemy import Boolean
+assert sqlalchemy_type is Boolean
+```
+
+#### Getting Canonical Types
+Access the canonical type representation directly:
+
+```python
+# Get canonical type for Python int
+canonical = mapper.get_canonical_type(int, 'python')  # Returns 'integer'
+
+# Get library type from canonical
+python_type = mapper.get_library_type('integer', 'python')  # Returns int
 ```
 
 ---
@@ -145,6 +244,46 @@ Converts the input data from the source type to the target type.
   - `ValueError`: If the conversion is unsupported or the data is invalid.
   - `ImportError`: If a required dependency is missing.
 
+### `TypeMapper` Class
+The core class for mapping types between different libraries.
+
+#### `__init__(self)`
+Initializes the mapper with supported library mappings.
+
+#### `get_canonical_type(self, type_obj: Any, library: str) -> str`
+Converts a library-specific type to a canonical type representation.
+
+- **Parameters**:
+  - `type_obj`: The type object to convert (e.g., `int`, `sqlalchemy.Integer`).
+  - `library`: The source library name (e.g., 'python', 'sqlalchemy').
+- **Returns**: A string representing the canonical type (e.g., 'integer', 'string').
+- **Raises**:
+  - `ValueError`: If the type or library is unsupported.
+  - `ImportError`: If a required dependency is missing.
+
+#### `get_library_type(self, canonical_type: str, library: str) -> Any`
+Converts a canonical type to a library-specific type.
+
+- **Parameters**:
+  - `canonical_type`: The canonical type string (e.g., 'integer', 'string').
+  - `library`: The target library name (e.g., 'python', 'sqlalchemy').
+- **Returns**: A type object from the specified library (e.g., `int`, `sqlalchemy.Integer`).
+- **Raises**:
+  - `ValueError`: If the canonical type or library is unsupported.
+  - `ImportError`: If a required dependency is missing.
+
+#### `map_type(self, type_obj: Any, from_library: str, to_library: str) -> Any`
+Maps a type from one library to another via the canonical type system.
+
+- **Parameters**:
+  - `type_obj`: The type object to map (e.g., `int`, `sqlalchemy.Integer`).
+  - `from_library`: The source library name (e.g., 'python', 'sqlalchemy').
+  - `to_library`: The target library name (e.g., 'python', 'pandas').
+- **Returns**: A type object from the target library.
+- **Raises**:
+  - `ValueError`: If the type or library is unsupported.
+  - `ImportError`: If a required dependency is missing.
+
 ---
 
 ## Best Practices
@@ -160,6 +299,8 @@ Converts the input data from the source type to the target type.
       print(f"Missing dependency: {e}")
   ```
 - **Optimize Performance**: For large datasets (e.g., dataframes), test conversion performance and consider batching if necessary.
+- **Lazy Importing**: Take advantage of `politipo`'s lazy importing to avoid unnecessary dependencies. Only import required libraries when you actually use them.
+- **Use TypeMapper with TypeConverter**: For complex data pipelines, use TypeMapper to determine compatible types between different libraries, then use TypeConverter to perform the actual data conversions.
 
 ---
 
@@ -168,6 +309,25 @@ Converts the input data from the source type to the target type.
 - **Missing Library Errors**: If you encounter an `ImportError`, install the required library (e.g., `pip install pydantic` for Pydantic models).
 - **Unsupported Type Errors**: Ensure both `from_type` and `to_type` are supported by `politipo`. Check the Features section for supported types.
 - **Data Validation Errors**: Verify that the input data matches the structure expected by the target type (e.g., required fields are present).
+- **Type Mapping Errors**: If a type mapping fails, check that both the source and target libraries are supported and that the specific type has a defined mapping.
+
+---
+
+## Supported Type Mappings
+
+The following table outlines the canonical type mappings supported by `TypeMapper`:
+
+| Canonical Type | Python   | SQLAlchemy | Pandas        | Polars   |
+|----------------|----------|------------|---------------|----------|
+| 'integer'      | int      | Integer    | Int64Dtype()  | Int64    |
+| 'string'       | str      | String     | StringDtype() | Utf8     |
+| 'float'        | float    | Float      | 'float64'     | Float64  |
+| 'boolean'      | bool     | Boolean    | 'bool'        | Boolean  |
+
+Note that:
+- Each mapping only requires the respective library to be installed when actually used
+- Type mapping is bidirectional (e.g., you can map from 'python' to 'sqlalchemy' and vice versa)
+- NoneType is not supported directly; use Optional[T] for nullable types in Python typing
 
 ---
 
@@ -198,19 +358,19 @@ Below is an updated Markdown table that includes all available combinations of `
 | `list[dict]`          | `pd.DataFrame`        | Creates a Pandas DataFrame from a list of dictionaries                                       | ✅        | `[ {"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"} ]` | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
 | `list[Pydantic]`      | `pd.DataFrame`        | Creates a Pandas DataFrame from a list of Pydantic models                                    | ✅        | `[UserPydantic(id=1, name="Alice"), UserPydantic(id=2, name="Bob")]` | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
 | `list[SQLModel]`      | `pd.DataFrame`        | Creates a Pandas DataFrame from a list of SQLModel instances                                 | ✅        | `[UserSQLModel(id=1, name="Alice"), UserSQLModel(id=2, name="Bob")]` | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
+| `list[SQLAlchemy]`    | `pd.DataFrame`        | Converts a list of SQLAlchemy model instances to a Pandas DataFrame                          | ✅        | `[UserSQLAlchemy(id=1, name="Alice"), UserSQLAlchemy(id=2, name="Bob")]` | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
 | `list[dict]`          | `pl.DataFrame`        | Creates a Polars DataFrame from a list of dictionaries                                       | ✅        | `[ {"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"} ]` | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
 | `list[Pydantic]`      | `pl.DataFrame`        | Creates a Polars DataFrame from a list of Pydantic models                                    | ✅        | `[UserPydantic(id=1, name="Alice"), UserPydantic(id=2, name="Bob")]` | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
 | `list[SQLModel]`      | `pl.DataFrame`        | Creates a Polars DataFrame from a list of SQLModel instances                                 | ✅        | `[UserSQLModel(id=1, name="Alice"), UserSQLModel(id=2, name="Bob")]` | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
+| `list[SQLAlchemy]`    | `pl.DataFrame`        | Converts a list of SQLAlchemy model instances to a Polars DataFrame                          | ✅        | `[UserSQLAlchemy(id=1, name="Alice"), UserSQLAlchemy(id=2, name="Bob")]` | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` |
 | `pd.DataFrame`        | `list[Pydantic]`      | Converts a Pandas DataFrame to a list of Pydantic models                                     | ✅        | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | `[UserPydantic(id=1, name="Alice"), UserPydantic(id=2, name="Bob")]` |
 | `pd.DataFrame`        | `list[SQLModel]`      | Converts a Pandas DataFrame to a list of SQLModel instances                                  | ✅        | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | `[UserSQLModel(id=1, name="Alice"), UserSQLModel(id=2, name="Bob")]` |
+| `pd.DataFrame`        | `list[SQLAlchemy]`    | Converts a Pandas DataFrame to a list of SQLAlchemy model instances                          | ✅        | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | `[UserSQLAlchemy(id=1, name="Alice"), UserSQLAlchemy(id=2, name="Bob")]` |
 | `pl.DataFrame`        | `list[Pydantic]`      | Converts a Polars DataFrame to a list of Pydantic models                                     | ✅        | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | `[UserPydantic(id=1, name="Alice"), UserPydantic(id=2, name="Bob")]` |
 | `pl.DataFrame`        | `list[SQLModel]`      | Converts a Polars DataFrame to a list of SQLModel instances                                  | ✅        | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | `[UserSQLModel(id=1, name="Alice"), UserSQLModel(id=2, name="Bob")]` |
-| `str`                 | `dict`                | Not supported; raises ValueError                                                             | ❌        | `"invalid"`                                      | N/A                                              |
-| `dict`                | `list`                | Not supported; raises ValueError                                                             | ❌        | `{"id": 1, "name": "Alice"}`                     | N/A                                              |
-| `list[SQLAlchemy]`    | `pd.DataFrame`        | Not explicitly supported; requires manual list-to-dict conversion                            | ❌        | `[UserSQLAlchemy(id=1, name="Alice"), UserSQLAlchemy(id=2, name="Bob")]` | N/A                                              |
-| `list[SQLAlchemy]`    | `pl.DataFrame`        | Not explicitly supported; requires manual list-to-dict conversion                            | ❌        | `[UserSQLAlchemy(id=1, name="Alice"), UserSQLAlchemy(id=2, name="Bob")]` | N/A                                              |
-| `pd.DataFrame`        | `list[SQLAlchemy]`    | Not explicitly supported; returns list of SQLAlchemy instances but not tested                | ❌        | `pd.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | N/A                                              |
-| `pl.DataFrame`        | `list[SQLAlchemy]`    | Not explicitly supported; returns list of SQLAlchemy instances but not tested                | ❌        | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | N/A                                              |
+| `pl.DataFrame`        | `list[SQLAlchemy]`    | Converts a Polars DataFrame to a list of SQLAlchemy model instances                          | ✅        | `pl.DataFrame([{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}])` | `[UserSQLAlchemy(id=1, name="Alice"), UserSQLAlchemy(id=2, name="Bob")]` |
+| `str`                 | `dict`                | Not supported; raises ValueError with "Unsupported from_type" message                        | ❌        | `"invalid"`                                      | N/A                                              |
+| `dict`                | `list`                | Not supported; raises ValueError with "Unsupported to_type" message                          | ❌        | `{"id": 1, "name": "Alice"}`                     | N/A                                              |
 
 
 ---
@@ -225,15 +385,15 @@ Below is an updated Markdown table that includes all available combinations of `
    - `pl.DataFrame`: Polars DataFrame (`polars.DataFrame`).
 
 2. **Examples**:
-   - **From**: The "Example From" column uses the exact sample data from `test_politipo.py` where applicable (e.g., `sample_dict`, `sample_pydantic`).
+   - **From**: The "Example From" column uses the exact sample data from `test_type_converter.py` where applicable (e.g., `sample_dict`, `sample_pydantic`).
    - **To**: The "Example To" column shows the expected output, simplified for readability. For DataFrames, the output is shown as the constructor call that matches the content, though actual instances would have additional metadata (e.g., column types).
    - **N/A**: For unsupported conversions, no example output is provided as they raise exceptions.
 
 3. **Supported Combinations**:
    - The ✅ entries are fully implemented and tested, with examples drawn from the test suite.
-   - For DataFrame-related conversions, the `from_type` involves lists or DataFrames, and the `to_type` may result in lists, reflecting the library’s handling of collections.
+   - For DataFrame-related conversions, the `from_type` involves lists or DataFrames, and the `to_type` may result in lists, reflecting the library's handling of collections.
 
 4. **Unsupported Combinations**:
-   - The ❌ entries show examples of inputs that would fail, with "N/A" for outputs since they aren’t produced.
-
-This table provides a comprehensive view of `politipo`’s conversion capabilities, enriched with practical examples to illustrate each supported combination.
+   - The ❌ entries show examples of inputs that would fail, with "N/A" for outputs since they aren't produced.
+   - Unsupported conversions will raise a specific ValueError with a descriptive message explaining the issue.
+   - The error messages clearly indicate whether the source type (`from_type`) or target type (`to_type`) is unsupported.

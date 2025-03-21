@@ -32,6 +32,7 @@ sample_sqlalchemy = UserSQLAlchemy(id=1, name="Alice")
 sample_list_dicts = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
 sample_list_pydantic = [UserPydantic(id=1, name="Alice"), UserPydantic(id=2, name="Bob")]
 sample_list_sqlmodel = [UserSQLModel(id=1, name="Alice"), UserSQLModel(id=2, name="Bob")]
+sample_list_sqlalchemy = [UserSQLAlchemy(id=1, name="Alice"), UserSQLAlchemy(id=2, name="Bob")]
 
 # DataFrames
 sample_df_pandas = pd.DataFrame(sample_list_dicts)
@@ -225,3 +226,39 @@ def test_collection_to_sqlmodel_from_polars():
     assert result[0].name == "Alice"
     assert result[1].id == 2
     assert result[1].name == "Bob"
+
+# New tests for DataFrame to SQLAlchemy conversions
+def test_collection_to_sqlalchemy_from_pandas():
+    converter = TypeConverter(from_type=pd.DataFrame, to_type=UserSQLAlchemy)
+    result = converter.convert(sample_df_pandas)
+    assert isinstance(result, list)
+    assert all(isinstance(item, UserSQLAlchemy) for item in result)
+    assert len(result) == 2
+    assert result[0].id == 1
+    assert result[0].name == "Alice"
+    assert result[1].id == 2
+    assert result[1].name == "Bob"
+
+def test_collection_to_sqlalchemy_from_polars():
+    converter = TypeConverter(from_type=pl.DataFrame, to_type=UserSQLAlchemy)
+    result = converter.convert(sample_df_polars)
+    assert isinstance(result, list)
+    assert all(isinstance(item, UserSQLAlchemy) for item in result)
+    assert len(result) == 2
+    assert result[0].id == 1
+    assert result[0].name == "Alice"
+    assert result[1].id == 2
+    assert result[1].name == "Bob"
+
+# New tests for SQLAlchemy to DataFrame conversions
+def test_to_pandas_from_list_sqlalchemy():
+    converter = TypeConverter(from_type=UserSQLAlchemy, to_type=pd.DataFrame)
+    result = converter.convert(sample_list_sqlalchemy)
+    assert isinstance(result, pd.DataFrame)
+    assert result.equals(sample_df_pandas)
+
+def test_to_polars_from_list_sqlalchemy():
+    converter = TypeConverter(from_type=UserSQLAlchemy, to_type=pl.DataFrame)
+    result = converter.convert(sample_list_sqlalchemy)
+    assert isinstance(result, pl.DataFrame)
+    assert result.equals(sample_df_polars) 

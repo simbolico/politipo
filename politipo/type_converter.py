@@ -170,6 +170,12 @@ class TypeConverter:
                             return pd.DataFrame(list_of_dicts)
                     except ImportError:
                         raise ImportError("Pydantic is required for converting Pydantic models to pd.DataFrame.")
+                    
+                    # Handle list of SQLAlchemy models
+                    if all(hasattr(item, '__table__') for item in data):
+                        list_of_dicts = [{c.name: getattr(item, c.name) for c in item.__table__.columns} for item in data]
+                        return pd.DataFrame(list_of_dicts)
+                    
                     raise ValueError("Data must be a list of dicts or Pydantic/SQLModel instances")
                 raise ValueError("Data must be a list for conversion to pd.DataFrame")
 
@@ -201,6 +207,12 @@ class TypeConverter:
                             return pl.DataFrame(list_of_dicts)
                     except ImportError:
                         raise ImportError("Pydantic is required for converting Pydantic models to pl.DataFrame.")
+                    
+                    # Handle list of SQLAlchemy models
+                    if all(hasattr(item, '__table__') for item in data):
+                        list_of_dicts = [{c.name: getattr(item, c.name) for c in item.__table__.columns} for item in data]
+                        return pl.DataFrame(list_of_dicts)
+                    
                     raise ValueError("Data must be a list of dicts or Pydantic/SQLModel instances")
                 raise ValueError("Data must be a list for conversion to pl.DataFrame")
 
@@ -217,4 +229,4 @@ class TypeConverter:
             except (ImportError, TypeError):
                 raise ImportError("Pydantic is required for converting pl.DataFrame to Pydantic models.")
 
-        raise ValueError(f"Unsupported conversion from '{self.from_type}' to '{self.to_type}'")
+        raise ValueError(f"Unsupported conversion from '{self.from_type}' to '{self.to_type}'") 
