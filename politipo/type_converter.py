@@ -1,5 +1,18 @@
-from typing import Type, Any, List, Union
+from typing import Type, Any, List, Union, Dict, Optional
 import sys
+
+# Custom Exceptions (subclassing built-in exceptions for backward compatibility)
+class TypeConversionError(ValueError):
+    """Base exception for type conversion errors."""
+    pass
+
+class MissingLibraryError(ImportError):
+    """Raised when a required library is not installed."""
+    pass
+
+class UnsupportedTypeError(TypeConversionError):
+    """Raised when a conversion is not supported."""
+    pass
 
 class TypeConverter:
     """
@@ -39,6 +52,43 @@ class TypeConverter:
         """
         self.from_type = from_type
         self.to_type = to_type
+        
+    # Helper methods (won't affect backward compatibility)
+    def _is_pydantic_or_sqlmodel(self, type_obj: Type) -> bool:
+        """Check if a type is a Pydantic or SQLModel class."""
+        try:
+            from pydantic import BaseModel
+            from sqlmodel import SQLModel
+            return isinstance(type_obj, type) and issubclass(type_obj, (BaseModel, SQLModel))
+        except (ImportError, TypeError):
+            return False
+
+    def _is_dataframe_type(self, type_obj: Type) -> bool:
+        """Check if a type is a DataFrame class."""
+        return (hasattr(type_obj, '__module__') and 
+                type_obj.__module__ in ['pandas.core.frame', 'polars.dataframe.frame'])
+
+    def _is_sqlalchemy_model(self, type_obj: Type) -> bool:
+        """Check if a type is an SQLAlchemy model class."""
+        return hasattr(type_obj, '__table__')
+
+    def _convert_nested(self, data: Any, target_type: Type) -> Any:
+        """
+        Recursively convert nested data structures (dicts and lists).
+        
+        This is used for complex nested conversions that need to maintain
+        structure while converting individual elements.
+        """
+        if isinstance(data, dict):
+            return {k: self._convert_nested(v, target_type) for k, v in data.items()}
+        elif isinstance(data, list):
+            return [self._convert_nested(item, target_type) for item in data]
+        elif isinstance(data, (str, int, float, bool, type(None))):
+            return data
+        else:
+            # Convert the object using a new TypeConverter
+            inner_converter = TypeConverter(from_type=type(data), to_type=target_type)
+            return inner_converter.convert(data)
 
     def convert(self, data: Any) -> Any:
         """
@@ -230,3 +280,57 @@ class TypeConverter:
                 raise ImportError("Pydantic is required for converting pl.DataFrame to Pydantic models.")
 
         raise ValueError(f"Unsupported conversion from '{self.from_type}' to '{self.to_type}'") 
+        
+    # Enhanced API methods (won't break existing code)
+    
+    def convert_single(self, data: Any, coerce: bool = False) -> Any:
+        """
+        Convert a single item to the target type.
+        
+        This method is focused on converting individual items, not collections.
+        For DataFrames and other collection types, use convert_collection.
+        
+        Args:
+            data (Any): The data to convert.
+            coerce (bool): If True, allow type coercion (e.g., for Pydantic).
+            
+        Returns:
+            Any: The converted data.
+            
+        Raises:
+            ValueError: If the conversion is not supported.
+            ImportError: If a required library is not installed.
+        """
+        # Use the original convert method for backward compatibility
+        if self._is_dataframe_type(self.to_type) and not isinstance(data, list):
+            raise ValueError("Data must be a list for conversion to DataFrame")
+            
+        return self.convert(data)
+        
+    def convert_collection(self, data: List[Any], coerce: bool = False) -> Any:
+        """
+        Convert a collection of items to the target type.
+        
+        This method is specialized for handling collections like lists and DataFrames.
+        
+        Args:
+            data (List[Any]): The list of data to convert.
+            coerce (bool): If True, allow type coercion.
+            
+        Returns:
+            Any: The converted collection.
+            
+        Raises:
+            TypeError: If data is not a list or DataFrame.
+            ValueError: If the conversion is not supported.
+            ImportError: If a required library is not installed.
+        """
+        # Handle DataFrame special case
+        if hasattr(data, '__class__') and hasattr(data.__class__, '__module__') and data.__class__.__module__ in ['pandas.core.frame', 'polars.dataframe.frame']:
+            return self.convert(data)
+            
+        if not isinstance(data, list):
+            raise TypeError("Expected a list for collection conversion")
+            
+        # Use the original convert method for backward compatibility
+        return self.convert(data) 

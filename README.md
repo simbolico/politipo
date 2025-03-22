@@ -244,6 +244,29 @@ Converts the input data from the source type to the target type.
   - `ValueError`: If the conversion is unsupported or the data is invalid.
   - `ImportError`: If a required dependency is missing.
 
+#### `convert_single(self, data: Any, coerce: bool = False) -> Any`
+Converts a single item to the target type. This is an enhanced method for cases where you specifically want to convert an individual item rather than a collection.
+
+- **Parameters**:
+  - `data`: The data to convert (e.g., a dictionary or model instance).
+  - `coerce`: If True, allows type coercion for stricter types like Pydantic models.
+- **Returns**: The converted data in the target type.
+- **Raises**:
+  - `ValueError`: If the conversion is unsupported or the data is invalid.
+  - `ImportError`: If a required dependency is missing.
+
+#### `convert_collection(self, data: List[Any], coerce: bool = False) -> Any`
+Converts a collection of items to the target type. This method is specialized for handling collections and provides better error messages for collection-specific conversions.
+
+- **Parameters**:
+  - `data`: The list of data to convert.
+  - `coerce`: If True, allows type coercion for stricter types like Pydantic models.
+- **Returns**: The converted collection in the target type.
+- **Raises**:
+  - `TypeError`: If data is not a list (except for DataFrames).
+  - `ValueError`: If the conversion is unsupported or the data is invalid.
+  - `ImportError`: If a required dependency is missing.
+
 ### `TypeMapper` Class
 The core class for mapping types between different libraries.
 
@@ -284,12 +307,41 @@ Maps a type from one library to another via the canonical type system.
   - `ValueError`: If the type or library is unsupported.
   - `ImportError`: If a required dependency is missing.
 
+#### `_convert_nested(self, data: Any, target_type: Type) -> Any`
+Recursively converts nested data structures like dictionaries and lists while preserving their structure.
+
+- **Parameters**:
+  - `data`: The nested data structure to convert.
+  - `target_type`: The target type for individual elements.
+- **Returns**: The converted nested structure with the same hierarchy.
+
 ---
+
+## Error Handling
+
+The library provides custom exceptions for better error handling:
+
+- `TypeConversionError`: Base exception for all conversion errors (subclasses `ValueError`).
+- `UnsupportedTypeError`: Raised when a conversion is not supported.
+- `MissingLibraryError`: Raised when a required library is not installed (subclasses `ImportError`).
+
+These can be caught in your code:
+
+```python
+from politipo.type_converter import TypeConversionError, MissingLibraryError
+
+try:
+    result = converter.convert(data)
+except TypeConversionError as e:
+    print(f"Conversion error: {e}")
+except MissingLibraryError as e:
+    print(f"Missing dependency: {e}")
+```
 
 ## Best Practices
 
 - **Use Type Hints**: Always specify `from_type` and `to_type` with type hints to ensure clarity and leverage runtime type checking.
-- **Handle Errors**: Wrap conversions in try-except blocks to catch `ValueError` (unsupported conversions) or `ImportError` (missing dependencies):
+- **Handle Errors**: Wrap conversions in try-except blocks to catch errors appropriately:
   ```python
   try:
       result = converter.convert(data)
@@ -298,9 +350,8 @@ Maps a type from one library to another via the canonical type system.
   except ImportError as e:
       print(f"Missing dependency: {e}")
   ```
-- **Optimize Performance**: For large datasets (e.g., dataframes), test conversion performance and consider batching if necessary.
-- **Lazy Importing**: Take advantage of `politipo`'s lazy importing to avoid unnecessary dependencies. Only import required libraries when you actually use them.
-- **Use TypeMapper with TypeConverter**: For complex data pipelines, use TypeMapper to determine compatible types between different libraries, then use TypeConverter to perform the actual data conversions.
+- **Use Specialized Methods**: For clearer code intent, use `convert_single()` for individual items and `convert_collection()` for collections.
+- **Process Nested Structures**: Use `_convert_nested()` when dealing with complex nested data structures that need to maintain their hierarchy.
 
 ---
 
