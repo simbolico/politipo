@@ -1,6 +1,6 @@
 [project]
 name = "politipo"
-version = "0.1.2"
+version = "0.1.3"
 description = "A library for seamless type conversions between Python data structures and models."
 authors = [{ name = "Kevin Saltarelli", email = "kevinqz@gmail.com" }]
 requires-python = ">=3.11"
