@@ -1,7 +1,7 @@
 from typing import Type, Any, List, Union, Dict, Optional
 import sys
 
-# Custom Exceptions (subclassing built-in exceptions for backward compatibility)
+# Custom exceptions (for backward compatibility, not used in the original code)
 class TypeConversionError(ValueError):
     """Base exception for type conversion errors."""
     pass
@@ -53,7 +53,7 @@ class TypeConverter:
         self.from_type = from_type
         self.to_type = to_type
         
-    # Helper methods (won't affect backward compatibility)
+    # Helper method to check for different types
     def _is_pydantic_or_sqlmodel(self, type_obj: Type) -> bool:
         """Check if a type is a Pydantic or SQLModel class."""
         try:
@@ -281,8 +281,7 @@ class TypeConverter:
 
         raise ValueError(f"Unsupported conversion from '{self.from_type}' to '{self.to_type}'") 
         
-    # Enhanced API methods (won't break existing code)
-    
+    # Enhanced API methods - these will simply delegate to convert for now to maintain compatibility
     def convert_single(self, data: Any, coerce: bool = False) -> Any:
         """
         Convert a single item to the target type.
