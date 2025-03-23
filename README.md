@@ -2,6 +2,8 @@
 
 Welcome to the official documentation for the `politipo` library! This guide provides a comprehensive overview of the library's functionality, usage, and best practices. Whether you're a beginner looking to get started or an advanced user seeking detailed API references, this documentation has you covered.
 
+Current version: 0.1.3 - Featuring automatic library detection for simplified type mapping.
+
 ---
 
 ## Introduction
@@ -64,11 +66,11 @@ from sqlalchemy import Integer
 mapper = TypeMapper()
 
 # Map SQLAlchemy Integer to Polars Int64
-polars_type = mapper.map_type(Integer, 'sqlalchemy', 'polars')
+polars_type = mapper.map_type(Integer, to_library='polars')  # Auto-detects SQLAlchemy
 print(polars_type)  # Output: Int64
 
 # Map Python int to Pandas Int64Dtype
-pandas_type = mapper.map_type(int, 'python', 'pandas')
+pandas_type = mapper.map_type(int, to_library='pandas')  # Auto-detects Python
 print(pandas_type)  # Output: Int64Dtype()
 ```
 
@@ -161,15 +163,19 @@ To map a type from one library to another, create a `TypeMapper` instance and us
 
 ```python
 mapper = TypeMapper()
-target_type = mapper.map_type(source_type, from_library, to_library)
+# Auto-detect the source library (if possible)
+target_type = mapper.map_type(source_type, to_library='target_library')
+
+# Or explicitly specify the source library
+target_type = mapper.map_type(source_type, to_library='target_library', from_library='source_library')
 ```
 
 #### Mapping Python Types
 Map between Python built-in types and other libraries:
 
 ```python
-# Map Python int to SQLAlchemy Integer
-sqlalchemy_type = mapper.map_type(int, 'python', 'sqlalchemy')
+# Map Python int to SQLAlchemy Integer (auto-detection)
+sqlalchemy_type = mapper.map_type(int, to_library='sqlalchemy')
 # Import needed only when using the result
 from sqlalchemy import Integer
 assert sqlalchemy_type is Integer
@@ -180,8 +186,8 @@ Map SQLAlchemy types to other libraries:
 
 ```python
 from sqlalchemy import String
-# Map SQLAlchemy String to Polars Utf8
-polars_type = mapper.map_type(String, 'sqlalchemy', 'polars')
+# Map SQLAlchemy String to Polars Utf8 (auto-detection)
+polars_type = mapper.map_type(String, to_library='polars')
 # Import needed only when using the result
 import polars as pl
 assert polars_type is pl.Utf8
@@ -192,8 +198,8 @@ Map Pandas types to other libraries:
 
 ```python
 import pandas as pd
-# Map Pandas StringDtype to Python str
-python_type = mapper.map_type(pd.StringDtype(), 'pandas', 'python')
+# Map Pandas StringDtype to Python str (auto-detection)
+python_type = mapper.map_type(pd.StringDtype(), to_library='python')
 assert python_type is str
 ```
 
@@ -202,8 +208,8 @@ Map Polars types to other libraries:
 
 ```python
 import polars as pl
-# Map Polars Boolean to SQLAlchemy Boolean
-sqlalchemy_type = mapper.map_type(pl.Boolean, 'polars', 'sqlalchemy')
+# Map Polars Boolean to SQLAlchemy Boolean (auto-detection)
+sqlalchemy_type = mapper.map_type(pl.Boolean, to_library='sqlalchemy')
 # Import needed only when using the result
 from sqlalchemy import Boolean
 assert sqlalchemy_type is Boolean
@@ -219,6 +225,35 @@ canonical = mapper.get_canonical_type(int, 'python')  # Returns 'integer'
 # Get library type from canonical
 python_type = mapper.get_library_type('integer', 'python')  # Returns int
 ```
+
+#### Automatic Library Detection
+The `TypeMapper` class now supports automatic detection of the source library for type objects. This makes it easier to map types between libraries without needing to explicitly specify the source library.
+
+### Using Library Auto-detection
+
+```python
+from politipo import TypeMapper
+from sqlalchemy import Integer
+import polars as pl
+
+mapper = TypeMapper()
+
+# Auto-detect sqlalchemy as the source library
+pl_type = mapper.map_type(Integer, to_library='polars')
+assert pl_type is pl.Int64
+
+# Auto-detect python as the source library
+sqlalchemy_type = mapper.map_type(int, to_library='sqlalchemy')
+assert sqlalchemy_type is Integer
+```
+
+The `detect_library` method identifies the library a type belongs to by checking:
+- Built-in Python types
+- Type annotations from typing module
+- Module paths and attributes
+- Library-specific type patterns
+
+When automatic detection is used, you only need to specify the target library. If detection fails, a `ValueError` is raised with a helpful message.
 
 ---
 
@@ -295,17 +330,26 @@ Converts a canonical type to a library-specific type.
   - `ValueError`: If the canonical type or library is unsupported.
   - `ImportError`: If a required dependency is missing.
 
-#### `map_type(self, type_obj: Any, from_library: str, to_library: str) -> Any`
+#### `map_type(self, type_obj: Any, to_library: str, from_library: Optional[str] = None) -> Any`
 Maps a type from one library to another via the canonical type system.
 
 - **Parameters**:
   - `type_obj`: The type object to map (e.g., `int`, `sqlalchemy.Integer`).
-  - `from_library`: The source library name (e.g., 'python', 'sqlalchemy').
   - `to_library`: The target library name (e.g., 'python', 'pandas').
+  - `from_library`: The source library name (e.g., 'python', 'sqlalchemy'). If None, the library will be auto-detected.
 - **Returns**: A type object from the target library.
 - **Raises**:
-  - `ValueError`: If the type or library is unsupported.
+  - `ValueError`: If the type or library is unsupported or auto-detection fails.
   - `ImportError`: If a required dependency is missing.
+
+#### `detect_library(self, type_obj: Any) -> str`
+Automatically detects which library a type object belongs to.
+
+- **Parameters**:
+  - `type_obj`: The type object to detect the library for (e.g., `int`, `sqlalchemy.Integer`).
+- **Returns**: A string representing the detected library (e.g., 'python', 'sqlalchemy', 'pandas', 'polars').
+- **Raises**:
+  - `ValueError`: If the library cannot be detected.
 
 #### `_convert_nested(self, data: Any, target_type: Type) -> Any`
 Recursively converts nested data structures like dictionaries and lists while preserving their structure.

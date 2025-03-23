@@ -70,10 +70,8 @@ class TestTypeMapper:
     
     # Cross-library mapping tests
     def test_map_type_python_to_python(self):
-        """Test mapping between Python types."""
-        # Map int to int (same type)
+        """Test mapping types from Python to Python."""
         assert self.mapper.map_type(int, 'python', 'python') is int
-        # Map str to str (same type)
         assert self.mapper.map_type(str, 'python', 'python') is str
     
     # SQLAlchemy tests (conditional on availability)
@@ -100,16 +98,16 @@ class TestTypeMapper:
         from sqlalchemy import Integer, String, Float, Boolean
         
         # Python to SQLAlchemy
-        assert self.mapper.map_type(int, 'python', 'sqlalchemy') is Integer
-        assert self.mapper.map_type(str, 'python', 'sqlalchemy') is String
-        assert self.mapper.map_type(float, 'python', 'sqlalchemy') is Float
-        assert self.mapper.map_type(bool, 'python', 'sqlalchemy') is Boolean
+        assert self.mapper.map_type(int, 'sqlalchemy', 'python') is Integer
+        assert self.mapper.map_type(str, 'sqlalchemy', 'python') is String
+        assert self.mapper.map_type(float, 'sqlalchemy', 'python') is Float
+        assert self.mapper.map_type(bool, 'sqlalchemy', 'python') is Boolean
         
         # SQLAlchemy to Python
-        assert self.mapper.map_type(Integer, 'sqlalchemy', 'python') is int
-        assert self.mapper.map_type(String, 'sqlalchemy', 'python') is str
-        assert self.mapper.map_type(Float, 'sqlalchemy', 'python') is float
-        assert self.mapper.map_type(Boolean, 'sqlalchemy', 'python') is bool
+        assert self.mapper.map_type(Integer, 'python', 'sqlalchemy') is int
+        assert self.mapper.map_type(String, 'python', 'sqlalchemy') is str
+        assert self.mapper.map_type(Float, 'python', 'sqlalchemy') is float
+        assert self.mapper.map_type(Boolean, 'python', 'sqlalchemy') is bool
     
     # Pandas tests (conditional on availability)
     @pytest.mark.skipif(not has_pandas, reason="Pandas not installed")
@@ -160,17 +158,17 @@ class TestTypeMapper:
         import polars as pl
         
         # SQLAlchemy -> Pandas
-        pd_type = self.mapper.map_type(Integer, 'sqlalchemy', 'pandas')
+        pd_type = self.mapper.map_type(Integer, 'pandas', 'sqlalchemy')
         assert isinstance(pd_type, pd.api.extensions.ExtensionDtype)
         assert str(pd_type) == 'Int64'
         
         # SQLAlchemy -> Polars
-        assert self.mapper.map_type(Integer, 'sqlalchemy', 'polars') is pl.Int64
+        assert self.mapper.map_type(Integer, 'polars', 'sqlalchemy') is pl.Int64
         
         # Pandas -> Polars
-        assert self.mapper.map_type(pd.Int64Dtype(), 'pandas', 'polars') is pl.Int64
+        assert self.mapper.map_type(pd.Int64Dtype(), 'polars', 'pandas') is pl.Int64
         
         # Polars -> Pandas
-        pd_type = self.mapper.map_type(pl.Int64, 'polars', 'pandas')
+        pd_type = self.mapper.map_type(pl.Int64, 'pandas', 'polars')
         assert isinstance(pd_type, pd.api.extensions.ExtensionDtype)
         assert str(pd_type) == 'Int64' 

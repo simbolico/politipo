@@ -1,4 +1,4 @@
-from typing import Any, Dict, Callable, Union, Tuple
+from typing import Any, Dict, Callable, Union, Tuple, Optional
 import sys
 from functools import lru_cache
 import datetime
@@ -89,17 +89,24 @@ class TypeMapper:
         except ImportError as e:
             raise ImportError(f"Required library for {library} is not installed: {e}")
 
-    def map_type(self, type_obj: Any, from_library: str, to_library: str) -> Any:
-        """Map a type from one library to another via canonical type.
+    def map_type(self, type_obj: Any, to_library: str, from_library: Optional[str] = None) -> Any:
+        """Map a type from one library to another.
 
         Args:
-            type_obj (Any): The type to map.
-            from_library (str): Source library.
-            to_library (str): Target library.
+            type_obj (Any): The type object to map.
+            to_library (str): The target library.
+            from_library (Optional[str]): The source library. If None, auto-detection will be attempted.
 
         Returns:
             Any: The mapped type.
+            
+        Raises:
+            ValueError: If from_library cannot be auto-detected or if mapping fails.
         """
+        # Only auto-detect if from_library is explicitly None
+        if from_library is None:
+            from_library = self.detect_library(type_obj)
+            
         canonical = self.get_canonical_type(type_obj, from_library)
         return self.get_library_type(canonical, to_library)
 
@@ -288,16 +295,58 @@ class TypeMapper:
         else:
             raise ValueError(f"No Polars type for canonical {canonical}")
 
-# Usage examples
-mapper = TypeMapper()
-
-# Python int to other libraries
-print(mapper.map_type(int, 'python', 'pydantic'))      # int
-print(mapper.map_type(int, 'python', 'sqlmodel'))      # int
-print(mapper.map_type(int, 'python', 'sqlalchemy'))    # <class 'sqlalchemy.sql.sqltypes.Integer'>
-print(mapper.map_type(int, 'python', 'pandas'))        # Int64Dtype()
-print(mapper.map_type(int, 'python', 'polars'))        # Int64
-
-# SQLAlchemy Integer to Polars
-from sqlalchemy import Integer
-print(mapper.map_type(Integer, 'sqlalchemy', 'polars'))  # Int64
+    def detect_library(self, type_obj: Any) -> str:
+        """Automatically detect which library a type belongs to.
+        
+        Args:
+            type_obj: The type object to detect the library for
+            
+        Returns:
+            str: Library name ('python', 'sqlalchemy', 'pandas', 'polars', etc.)
+            
+        Raises:
+            ValueError: If the library cannot be determined
+        """
+        # Check Python built-in types
+        if type_obj in (int, str, float, bool, dict, list, datetime.date, datetime.datetime, decimal.Decimal):
+            return 'python'
+        
+        # Check if it's a type annotation from typing module
+        if hasattr(type_obj, '__origin__') and hasattr(type_obj, '__args__'):
+            return 'python'
+            
+        # Check by module path
+        if hasattr(type_obj, '__module__'):
+            module = type_obj.__module__
+            
+            if module.startswith('sqlalchemy'):
+                return 'sqlalchemy'
+            elif module.startswith('pandas'):
+                return 'pandas'
+            elif module.startswith('polars'):
+                return 'polars'
+            elif module.startswith('pydantic'):
+                return 'pydantic'
+            elif module.startswith('sqlmodel'):
+                return 'sqlmodel'
+        
+        # Check SQLAlchemy types specifically
+        if hasattr(type_obj, '__visit_name__') and hasattr(type_obj, 'compile'):
+            return 'sqlalchemy'
+            
+        # Check specific instances for pandas/polars (string dtype representations)
+        try:
+            import pandas as pd
+            if isinstance(type_obj, pd.api.extensions.ExtensionDtype) or isinstance(type_obj, str) and type_obj in ('float64', 'bool', 'datetime64[ns]'):
+                return 'pandas'
+        except (ImportError, AttributeError):
+            pass
+            
+        try:
+            import polars as pl
+            if type_obj in (pl.Int64, pl.Utf8, pl.Float64, pl.Boolean, pl.Date, pl.Datetime, pl.Decimal):
+                return 'polars'
+        except (ImportError, AttributeError):
+            pass
+        
+        raise ValueError(f"Could not automatically determine library for type: {type_obj}")
