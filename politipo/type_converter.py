@@ -41,6 +41,7 @@ class TypeConverter:
         - For SQLAlchemy conversions, install 'sqlalchemy'.
         - For Pandas conversions, install 'pandas'.
         - For Polars conversions, install 'polars'.
+        - For Pandera schema validation, install 'pandera'.
     """
     def __init__(self, from_type: Type, to_type: Type):
         """
@@ -67,6 +68,14 @@ class TypeConverter:
         """Check if a type is a DataFrame class."""
         return (hasattr(type_obj, '__module__') and 
                 type_obj.__module__ in ['pandas.core.frame', 'polars.dataframe.frame'])
+    
+    def _is_pandera_schema(self, type_obj: Any) -> bool:
+        """Check if an object is a Pandera DataFrameSchema."""
+        try:
+            import pandera as pa
+            return isinstance(type_obj, pa.DataFrameSchema)
+        except (ImportError, TypeError):
+            return False
 
     def _is_sqlalchemy_model(self, type_obj: Type) -> bool:
         """Check if a type is an SQLAlchemy model class."""
@@ -104,6 +113,45 @@ class TypeConverter:
             ImportError: If a required library for the conversion is not installed.
             ValueError: If the conversion is not supported or data is incompatible.
         """
+        # Handle Pandera schema validation
+        try:
+            import pandera as pa
+            if isinstance(self.to_type, pa.DataFrameSchema):
+                # Check if data is a DataFrame from Pandas
+                pd_available = False
+                try:
+                    import pandas as pd
+                    pd_available = True
+                except ImportError:
+                    pd = None
+                
+                # For Pandas DataFrames
+                if pd_available and isinstance(data, pd.DataFrame):
+                    return self.to_type.validate(data)
+                
+                # For Polars DataFrames, convert to Pandas first since Pandera doesn't support Polars directly
+                try:
+                    import polars as pl
+                    if isinstance(data, pl.DataFrame):
+                        # Convert to Pandas DataFrame for validation
+                        import pandas as pd
+                        pandas_df = data.to_pandas()
+                        # Validate with Pandera
+                        validated_df = self.to_type.validate(pandas_df)
+                        # Convert back to Polars
+                        return pl.from_pandas(validated_df)
+                except (ImportError, AttributeError) as e:
+                    if "polars" in str(e):
+                        raise ValueError("Polars is required for this conversion.") from e
+                    if "pandas" in str(e):
+                        raise ValueError("Pandas is required for Polars to Pandera validation.") from e
+                    raise
+                    
+                raise ValueError("Data must be a Pandas or Polars DataFrame for Pandera schema validation")
+        except ImportError:
+            if hasattr(self.to_type, 'validate') and hasattr(self.to_type, 'columns'):  # Rough check for Pandera schema
+                raise ImportError("Pandera is required for this conversion. Please install it.")
+        
         # Special case for test_missing_library
         if 'pydantic' not in sys.modules or sys.modules['pydantic'] is None:
             if ((hasattr(self.from_type, 'model_dump') or hasattr(self.to_type, 'model_validate')) or
@@ -300,6 +348,14 @@ class TypeConverter:
             ValueError: If the conversion is not supported.
             ImportError: If a required library is not installed.
         """
+        # Check for Pandera schema validation
+        try:
+            import pandera as pa
+            if isinstance(self.to_type, pa.DataFrameSchema):
+                return self.convert(data)
+        except ImportError:
+            pass
+            
         # Use the original convert method for backward compatibility
         if self._is_dataframe_type(self.to_type) and not isinstance(data, list):
             raise ValueError("Data must be a list for conversion to DataFrame")
@@ -324,6 +380,14 @@ class TypeConverter:
             ValueError: If the conversion is not supported.
             ImportError: If a required library is not installed.
         """
+        # Check for Pandera schema validation for DataFrames
+        try:
+            import pandera as pa
+            if isinstance(self.to_type, pa.DataFrameSchema):
+                return self.convert(data)
+        except ImportError:
+            pass
+            
         # Handle DataFrame special case
         if hasattr(data, '__class__') and hasattr(data.__class__, '__module__') and data.__class__.__module__ in ['pandas.core.frame', 'polars.dataframe.frame']:
             return self.convert(data)

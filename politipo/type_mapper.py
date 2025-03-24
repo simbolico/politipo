@@ -32,6 +32,11 @@ class TypeMapper:
                 'to_canonical': self._polars_to_canonical,
                 'from_canonical': self._canonical_to_polars,
             },
+            # Add Pandera mapping
+            'pandera': {
+                'to_canonical': self._pandera_to_canonical,
+                'from_canonical': self._canonical_to_pandera,
+            },
         }
 
     @lru_cache(maxsize=128)
@@ -294,6 +299,77 @@ class TypeMapper:
             return pl.Decimal
         else:
             raise ValueError(f"No Polars type for canonical {canonical}")
+    
+    # Pandera mappings
+    def _pandera_to_canonical(self, type_obj: Any) -> str:
+        """Convert a Pandera type to a canonical type.
+        
+        Args:
+            type_obj: A Pandera data type (e.g., pa.Int, pa.String)
+            
+        Returns:
+            str: Canonical type representation
+            
+        Raises:
+            ImportError: If Pandera is not installed
+            ValueError: If the type is not supported
+        """
+        try:
+            import pandera as pa
+        except ImportError:
+            raise ImportError("Pandera is required for this type mapping. Please install it.")
+        
+        if isinstance(type_obj, pa.Int) or type_obj is pa.Int:
+            return 'integer'
+        elif isinstance(type_obj, pa.String) or type_obj is pa.String:
+            return 'string'
+        elif isinstance(type_obj, pa.Float) or type_obj is pa.Float:
+            return 'float'
+        elif isinstance(type_obj, pa.Bool) or type_obj is pa.Bool:
+            return 'boolean'
+        elif isinstance(type_obj, pa.Date) or type_obj is pa.Date:
+            return 'date'
+        elif isinstance(type_obj, pa.DateTime) or type_obj is pa.DateTime:
+            return 'datetime'
+        elif isinstance(type_obj, pa.Decimal) or type_obj is pa.Decimal:
+            return 'decimal'
+        else:
+            raise ValueError(f"No canonical mapping for Pandera type {type_obj}")
+
+    def _canonical_to_pandera(self, canonical: str) -> Any:
+        """Convert a canonical type to a Pandera type.
+        
+        Args:
+            canonical: Canonical type string (e.g., 'integer', 'string')
+            
+        Returns:
+            Pandera data type class
+            
+        Raises:
+            ImportError: If Pandera is not installed
+            ValueError: If the canonical type is not supported
+        """
+        try:
+            import pandera as pa
+        except ImportError:
+            raise ImportError("Pandera is required for this type mapping. Please install it.")
+        
+        if canonical == 'integer':
+            return pa.Int
+        elif canonical == 'string':
+            return pa.String
+        elif canonical == 'float':
+            return pa.Float
+        elif canonical == 'boolean':
+            return pa.Bool
+        elif canonical == 'date':
+            return pa.Date
+        elif canonical == 'datetime':
+            return pa.DateTime
+        elif canonical == 'decimal':
+            return pa.Decimal
+        else:
+            raise ValueError(f"No Pandera type for canonical {canonical}")
 
     def detect_library(self, type_obj: Any) -> str:
         """Automatically detect which library a type belongs to.
@@ -302,7 +378,7 @@ class TypeMapper:
             type_obj: The type object to detect the library for
             
         Returns:
-            str: Library name ('python', 'sqlalchemy', 'pandas', 'polars', etc.)
+            str: Library name ('python', 'sqlalchemy', 'pandas', 'polars', 'pandera', etc.)
             
         Raises:
             ValueError: If the library cannot be determined
@@ -329,6 +405,8 @@ class TypeMapper:
                 return 'pydantic'
             elif module.startswith('sqlmodel'):
                 return 'sqlmodel'
+            elif module.startswith('pandera'):
+                return 'pandera'
         
         # Check SQLAlchemy types specifically
         if hasattr(type_obj, '__visit_name__') and hasattr(type_obj, 'compile'):
@@ -346,6 +424,21 @@ class TypeMapper:
             import polars as pl
             if type_obj in (pl.Int64, pl.Utf8, pl.Float64, pl.Boolean, pl.Date, pl.Datetime, pl.Decimal):
                 return 'polars'
+        except (ImportError, AttributeError):
+            pass
+        
+        # Check for Pandera types
+        try:
+            import pandera as pa
+            # Check for class types like pa.Int
+            if type_obj in (pa.Int, pa.String, pa.Float, pa.Bool, pa.Date, pa.DateTime, pa.Decimal):
+                return 'pandera'
+            # Check for instance types
+            if isinstance(type_obj, (pa.Int, pa.String, pa.Float, pa.Bool, pa.Date, pa.DateTime, pa.Decimal)):
+                return 'pandera'
+            # Check if it's a subclass of DataType
+            if isinstance(type_obj, type) and hasattr(pa, 'DataType') and issubclass(type_obj, pa.DataType):
+                return 'pandera'
         except (ImportError, AttributeError):
             pass
         
