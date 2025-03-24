@@ -1,4 +1,4 @@
-from typing import Any, Dict, Callable, Union, Tuple, Optional
+from typing import Any, Dict, Callable, Union, Tuple, Optional, Type
 import sys
 from functools import lru_cache
 import datetime
@@ -13,8 +13,8 @@ class TypeMapper:
                 'from_canonical': self._canonical_to_python,
             },
             'pydantic': {
-                'to_canonical': self._python_to_canonical,
-                'from_canonical': self._canonical_to_python,
+                'to_canonical': self._pydantic_to_canonical,
+                'from_canonical': self._canonical_to_pydantic,
             },
             'sqlmodel': {
                 'to_canonical': self._python_to_canonical,
@@ -38,6 +38,13 @@ class TypeMapper:
                 'from_canonical': self._canonical_to_pandera,
             },
         }
+        
+        # Cache for Pydantic version
+        self._pydantic_version = None
+        
+        # Special Pydantic types cache
+        self._pydantic_email_str = None
+        self._pydantic_secret_str = None
 
     @lru_cache(maxsize=128)
     def get_canonical_type(self, type_obj: Any, library: str) -> Union[str, Tuple]:
@@ -87,6 +94,10 @@ class TypeMapper:
                     inner_type = self.get_library_type(inner_canonical, library)
                     from typing import List
                     return List[inner_type]
+                elif canonical_type[0] == 'pydantic_model' and library == 'pydantic':
+                    # Handle Pydantic model reconstruction
+                    model_name, schema = canonical_type[1], canonical_type[2]
+                    return self._create_pydantic_model_from_schema(model_name, schema)
                 else:
                     raise ValueError(f"Unsupported composite canonical type {canonical_type}")
             else:
@@ -137,7 +148,7 @@ class TypeMapper:
         self.get_canonical_type.cache_clear()
         self.get_library_type.cache_clear()
 
-    # Python mappings (used by Python, Pydantic, SQLModel)
+    # Python mappings (used by Python, SQLModel)
     def _python_to_canonical(self, type_obj: Any) -> Union[str, Tuple]:
         from typing import get_origin, get_args
         origin = get_origin(type_obj)
@@ -189,6 +200,404 @@ class TypeMapper:
             return List[inner_type]
         else:
             raise ValueError(f"Unsupported canonical type {canonical}")
+    
+    # Pydantic-specific mapping functions
+    def _pydantic_to_canonical(self, type_obj: Any) -> Union[str, Tuple]:
+        """Convert Pydantic types to canonical types with enhanced support."""
+        try:
+            from pydantic import BaseModel
+            
+            # Handle special Pydantic types first (both v1 and v2)
+            email_str_class = self._get_pydantic_email_str()
+            secret_str_class = self._get_pydantic_secret_str()
+            
+            if email_str_class and type_obj is email_str_class:
+                return 'email'
+                
+            if secret_str_class and type_obj is secret_str_class:
+                return 'secret'
+            
+            # Handle Pydantic model classes
+            if isinstance(type_obj, type) and issubclass(type_obj, BaseModel):
+                schema = self._extract_model_schema(type_obj)
+                # Use tuple instead of dict to make it hashable for caching
+                schema_tuple = self._dict_to_tuple(schema)
+                return ('pydantic_model', type_obj.__name__, schema_tuple)
+                
+            # Handle Pydantic constrained types (v1)
+            if self._get_pydantic_version() == 1:
+                try:
+                    from pydantic.types import (
+                        conint, confloat, constr, PositiveInt, NegativeInt,
+                        PositiveFloat, NegativeFloat
+                    )
+                    
+                    if hasattr(type_obj, "__origin__") and type_obj.__origin__ == conint:
+                        constraints = getattr(type_obj, "__constraints__", {})
+                        constraints_tuple = self._dict_to_tuple(constraints)
+                        return ('constrained', 'integer', constraints_tuple)
+                    
+                    if hasattr(type_obj, "__origin__") and type_obj.__origin__ == confloat:
+                        constraints = getattr(type_obj, "__constraints__", {})
+                        constraints_tuple = self._dict_to_tuple(constraints)
+                        return ('constrained', 'float', constraints_tuple)
+                    
+                    if hasattr(type_obj, "__origin__") and type_obj.__origin__ == constr:
+                        constraints = getattr(type_obj, "__constraints__", {})
+                        constraints_tuple = self._dict_to_tuple(constraints)
+                        return ('constrained', 'string', constraints_tuple)
+                    
+                    # Handle specific types
+                    if type_obj is PositiveInt:
+                        return ('constrained', 'integer', (('gt', 0),))
+                    
+                    if type_obj is NegativeInt:
+                        return ('constrained', 'integer', (('lt', 0),))
+                except (ImportError, AttributeError):
+                    pass
+            
+            # Handle Pydantic constrained types (v2)
+            elif self._get_pydantic_version() == 2:
+                # Import newer Pydantic 2.x annotation types if available
+                try:
+                    from pydantic.fields import FieldInfo
+                    from typing import Annotated, get_origin, get_args
+                    
+                    # Check for annotated types with constraints
+                    if get_origin(type_obj) is Annotated:
+                        args = get_args(type_obj)
+                        if args:
+                            base_type = args[0]
+                            constraints = {}
+                            
+                            for arg in args[1:]:
+                                if isinstance(arg, FieldInfo):
+                                    # Extract constraints from Field object
+                                    if hasattr(arg, 'ge'):
+                                        constraints['ge'] = arg.ge
+                                    if hasattr(arg, 'gt'):
+                                        constraints['gt'] = arg.gt
+                                    if hasattr(arg, 'le'):
+                                        constraints['le'] = arg.le
+                                    if hasattr(arg, 'lt'):
+                                        constraints['lt'] = arg.lt
+                                    if hasattr(arg, 'min_length'):
+                                        constraints['min_length'] = arg.min_length
+                                    if hasattr(arg, 'max_length'):
+                                        constraints['max_length'] = arg.max_length
+                                    if hasattr(arg, 'pattern'):
+                                        constraints['pattern'] = arg.pattern
+                            
+                            constraints_tuple = self._dict_to_tuple(constraints)
+                            
+                            if base_type is int:
+                                return ('constrained', 'integer', constraints_tuple)
+                            elif base_type is float:
+                                return ('constrained', 'float', constraints_tuple)
+                            elif base_type is str:
+                                return ('constrained', 'string', constraints_tuple)
+                except (ImportError, AttributeError):
+                    pass
+            
+            # Fall back to Python type mapping for other types
+            return self._python_to_canonical(type_obj)
+            
+        except ImportError:
+            raise ImportError("Pydantic is required for this mapping.")
+
+    def _canonical_to_pydantic(self, canonical: Union[str, Tuple]) -> Any:
+        """Convert canonical types to Pydantic types with enhanced support."""
+        try:
+            # Handle Pydantic-specific canonical types
+            if isinstance(canonical, str):
+                if canonical == 'email':
+                    email_str_class = self._get_pydantic_email_str()
+                    if email_str_class:
+                        return email_str_class
+                    return str  # Fallback if EmailStr not available
+                
+                if canonical == 'secret':
+                    secret_str_class = self._get_pydantic_secret_str()
+                    if secret_str_class:
+                        return secret_str_class
+                    return str  # Fallback if SecretStr not available
+                
+                # Fall back to Python mapping for basic types
+                return self._canonical_to_python(canonical)
+            
+            # Handle constrained types
+            elif isinstance(canonical, tuple) and canonical[0] == 'constrained':
+                base_type, constraints_tuple = canonical[1], canonical[2]
+                constraints = dict(constraints_tuple)
+                
+                if self._get_pydantic_version() == 1:
+                    from pydantic import conint, confloat, constr
+                    
+                    if base_type == 'integer':
+                        return conint(**constraints)
+                    elif base_type == 'float':
+                        return confloat(**constraints)
+                    elif base_type == 'string':
+                        return constr(**constraints)
+                
+                elif self._get_pydantic_version() == 2:
+                    from typing import Annotated
+                    from pydantic import Field
+                    
+                    base_python_type = self._canonical_to_python(base_type)
+                    return Annotated[base_python_type, Field(**constraints)]
+            
+            # Handle pydantic model
+            elif isinstance(canonical, tuple) and canonical[0] == 'pydantic_model':
+                model_name, schema_tuple = canonical[1], canonical[2]
+                schema = dict(schema_tuple)
+                return self._create_pydantic_model_from_schema(model_name, schema)
+            
+            # Handle list types
+            elif isinstance(canonical, tuple) and canonical[0] == 'list':
+                inner_canonical = canonical[1]
+                inner_type = self._canonical_to_pydantic(inner_canonical)
+                from typing import List
+                return List[inner_type]
+            
+            else:
+                raise ValueError(f"Unsupported canonical type {canonical} for Pydantic")
+                
+        except ImportError:
+            raise ImportError("Pydantic is required for this mapping.")
+
+    def _get_pydantic_version(self) -> int:
+        """Detect the Pydantic version being used."""
+        if self._pydantic_version is not None:
+            return self._pydantic_version
+            
+        try:
+            import pydantic
+            
+            # Check for v2 specific attributes
+            if hasattr(pydantic.BaseModel, "model_dump"):
+                self._pydantic_version = 2
+            else:
+                self._pydantic_version = 1
+                
+            return self._pydantic_version
+            
+        except ImportError:
+            raise ImportError("Pydantic is required for version detection.")
+            
+    def _get_pydantic_email_str(self):
+        """Get the Pydantic EmailStr class, with caching."""
+        if self._pydantic_email_str is not None:
+            return self._pydantic_email_str
+            
+        try:
+            from pydantic import EmailStr
+            self._pydantic_email_str = EmailStr
+            return EmailStr
+        except (ImportError, AttributeError):
+            self._pydantic_email_str = None
+            return None
+            
+    def _get_pydantic_secret_str(self):
+        """Get the Pydantic SecretStr class, with caching."""
+        if self._pydantic_secret_str is not None:
+            return self._pydantic_secret_str
+            
+        try:
+            from pydantic import SecretStr
+            self._pydantic_secret_str = SecretStr
+            return SecretStr
+        except (ImportError, AttributeError):
+            self._pydantic_secret_str = None
+            return None
+
+    def _extract_model_schema(self, model_class: Type) -> Dict:
+        """Extract schema from a Pydantic model based on its version."""
+        try:
+            version = self._get_pydantic_version()
+            
+            if version == 2:
+                # Pydantic v2 schema extraction
+                return model_class.model_json_schema()
+            else:
+                # Pydantic v1 schema extraction
+                return model_class.schema()
+                
+        except ImportError:
+            raise ImportError("Pydantic is required for schema extraction.")
+            
+    def _dict_to_tuple(self, d: Dict) -> Tuple:
+        """Convert a dictionary to a tuple of tuples for hashability."""
+        if not isinstance(d, dict):
+            return d
+            
+        items = []
+        for k, v in sorted(d.items()):
+            if isinstance(v, dict):
+                items.append((k, self._dict_to_tuple(v)))
+            elif isinstance(v, list):
+                items.append((k, tuple(self._dict_to_tuple(item) if isinstance(item, dict) else item for item in v)))
+            else:
+                items.append((k, v))
+                
+        return tuple(items)
+        
+    def _tuple_to_dict(self, t: Tuple) -> Dict:
+        """Convert a tuple of tuples back to a dictionary."""
+        if not isinstance(t, tuple):
+            return t
+            
+        result = {}
+        for k, v in t:
+            if isinstance(v, tuple) and all(isinstance(x, tuple) and len(x) == 2 for x in v):
+                result[k] = self._tuple_to_dict(v)
+            elif isinstance(v, tuple):
+                result[k] = list(self._tuple_to_dict(item) if isinstance(item, tuple) and 
+                                all(isinstance(x, tuple) and len(x) == 2 for x in item)
+                                else item for item in v)
+            else:
+                result[k] = v
+                
+        return result
+
+    def _create_pydantic_model_from_schema(self, model_name: str, schema_tuple: Tuple) -> Type:
+        """Create a Pydantic model from a JSON schema tuple."""
+        try:
+            from pydantic import create_model, Field
+            
+            # Convert schema tuple to a dict manually since the tuple structure is complex
+            schema_dict = self._tuple_to_dict(schema_tuple)
+            
+            # Extract field definitions from schema
+            fields = {}
+            properties = schema_dict.get("properties", {})
+            required = schema_dict.get("required", [])
+            
+            for field_name, field_schema in properties.items():
+                # Convert JSON schema type to Python/Pydantic type
+                field_type = self._convert_json_schema_to_type(field_schema)
+                
+                # Extract field constraints
+                constraints = {}
+                if "minimum" in field_schema:
+                    constraints["ge"] = field_schema["minimum"]
+                if "maximum" in field_schema:
+                    constraints["le"] = field_schema["maximum"]
+                if "exclusiveMinimum" in field_schema:
+                    constraints["gt"] = field_schema["exclusiveMinimum"]
+                if "exclusiveMaximum" in field_schema:
+                    constraints["lt"] = field_schema["exclusiveMaximum"]
+                if "pattern" in field_schema:
+                    constraints["pattern"] = field_schema["pattern"]
+                if "minLength" in field_schema:
+                    constraints["min_length"] = field_schema["minLength"]
+                if "maxLength" in field_schema:
+                    constraints["max_length"] = field_schema["maxLength"]
+                
+                # Handle required fields
+                is_required = field_name in required
+                if not is_required:
+                    from typing import Optional
+                    field_type = Optional[field_type]
+                    
+                    # Add default value if available
+                    if "default" in field_schema:
+                        constraints["default"] = field_schema["default"]
+                
+                # Create field with constraints
+                if constraints:
+                    fields[field_name] = (field_type, Field(**constraints))
+                else:
+                    fields[field_name] = (field_type, None)
+            
+            # Create and return the model
+            return create_model(model_name, **fields)
+            
+        except ImportError:
+            raise ImportError("Pydantic is required for model creation.")
+        except Exception as e:
+            # Fallback to simpler model if schema processing fails
+            return self._create_simple_model(model_name, schema_tuple)
+
+    def _create_simple_model(self, model_name: str, schema_tuple: Tuple) -> Type:
+        """Create a simplified Pydantic model when full schema processing fails."""
+        try:
+            from pydantic import create_model, Field
+            
+            # Extract just the field names and basic types
+            fields = {}
+            
+            # Find properties in tuple
+            properties = None
+            for key, value in schema_tuple:
+                if key == 'properties':
+                    properties = value
+                    break
+            
+            if properties:
+                for prop_item in properties:
+                    field_name = prop_item[0]
+                    field_schema = prop_item[1]
+                    
+                    # Determine basic type
+                    field_type = str  # Default to string
+                    for schema_key, schema_value in field_schema:
+                        if schema_key == 'type':
+                            if schema_value == 'integer':
+                                field_type = int
+                            elif schema_value == 'number':
+                                field_type = float
+                            elif schema_value == 'boolean':
+                                field_type = bool
+                            elif schema_value == 'string':
+                                field_type = str
+                            break
+                    
+                    fields[field_name] = (field_type, None)
+            
+            # Create model with basic fields
+            return create_model(model_name, **fields)
+        
+        except Exception as e:
+            # If all else fails, return a dummy model
+            from pydantic import create_model
+            return create_model(model_name, id=(int, None), name=(str, None))
+
+    def _convert_json_schema_to_type(self, field_schema: Dict) -> Type:
+        """Convert a JSON schema field definition to a Python/Pydantic type."""
+        schema_type = field_schema.get("type")
+        
+        if schema_type == "integer":
+            return int
+        elif schema_type == "number":
+            return float
+        elif schema_type == "string":
+            # Check for format
+            if field_schema.get("format") == "date":
+                return datetime.date
+            elif field_schema.get("format") == "date-time":
+                return datetime.datetime
+            elif field_schema.get("format") == "email":
+                email_str_class = self._get_pydantic_email_str()
+                if email_str_class:
+                    return email_str_class
+                return str
+            else:
+                return str
+        elif schema_type == "boolean":
+            return bool
+        elif schema_type == "array":
+            from typing import List
+            item_type = self._convert_json_schema_to_type(field_schema.get("items", {}))
+            return List[item_type]
+        elif schema_type == "object":
+            from typing import Dict, Any
+            # For objects, we'd need to create nested models
+            # This is a simplified implementation
+            return Dict[str, Any]
+        else:
+            from typing import Any
+            return Any
 
     # SQLAlchemy mappings
     def _sqlalchemy_to_canonical(self, type_obj: Any) -> str:
@@ -411,6 +820,49 @@ class TypeMapper:
         # Check SQLAlchemy types specifically
         if hasattr(type_obj, '__visit_name__') and hasattr(type_obj, 'compile'):
             return 'sqlalchemy'
+        
+        # Check specifically for Pydantic models and types
+        try:
+            from pydantic import BaseModel
+            
+            # Check if it's a Pydantic model class
+            if isinstance(type_obj, type) and issubclass(type_obj, BaseModel):
+                return 'pydantic'
+                
+            # Check for specific Pydantic types
+            email_str_class = self._get_pydantic_email_str()
+            secret_str_class = self._get_pydantic_secret_str()
+            
+            if email_str_class and type_obj is email_str_class:
+                return 'pydantic'
+                
+            if secret_str_class and type_obj is secret_str_class:
+                return 'pydantic'
+                
+            # Check for Pydantic v1 constrained types
+            if self._get_pydantic_version() == 1:
+                try:
+                    from pydantic.types import conint, confloat, constr
+                    
+                    if hasattr(type_obj, "__origin__") and type_obj.__origin__ in (conint, confloat, constr):
+                        return 'pydantic'
+                except (ImportError, AttributeError):
+                    pass
+                    
+            # Check for Pydantic v2 constrained types
+            elif self._get_pydantic_version() == 2:
+                # In v2, constraints are often applied using Annotated with Field
+                if hasattr(type_obj, "__metadata__"):
+                    try:
+                        from pydantic.fields import FieldInfo
+                        
+                        for metadata in getattr(type_obj, "__metadata__", []):
+                            if isinstance(metadata, FieldInfo):
+                                return 'pydantic'
+                    except (ImportError, AttributeError):
+                        pass
+        except (ImportError, AttributeError):
+            pass
             
         # Check specific instances for pandas/polars (string dtype representations)
         try:

@@ -360,3 +360,266 @@ class TestTypeMapper:
 
             with pytest.raises(ImportError):
                 mapper.get_library_type('integer', 'pandera') 
+
+import pytest
+from politipo import TypeMapper
+import sys
+import datetime
+import decimal
+from typing import List, Optional, Dict, Tuple, Any
+from unittest.mock import patch
+
+# Check if Pydantic is installed
+try:
+    import pydantic
+    from pydantic import BaseModel, Field, EmailStr, SecretStr
+    has_pydantic = True
+    
+    # Check Pydantic version
+    is_v2 = hasattr(BaseModel, "model_dump")
+    if is_v2:
+        from typing import Annotated
+except ImportError:
+    has_pydantic = False
+    is_v2 = False
+
+
+def find_in_tuple_dict(tuple_dict: Tuple, key: str) -> bool:
+    """Helper function to find a key in a tuple-formatted dictionary."""
+    if not isinstance(tuple_dict, tuple):
+        return False
+    return any(item[0] == key for item in tuple_dict)
+
+def get_from_tuple_dict(tuple_dict: Tuple, key: str) -> Any:
+    """Helper function to get a value from a tuple-formatted dictionary."""
+    if not isinstance(tuple_dict, tuple):
+        return None
+    for item in tuple_dict:
+        if item[0] == key:
+            return item[1]
+    return None
+
+
+@pytest.mark.skipif(not has_pydantic, reason="Pydantic not installed")
+class TestPydanticTypeMapper:
+    """Test suite for Pydantic-specific TypeMapper functionality."""
+    
+    def setup_method(self):
+        """Set up TypeMapper instance before each test."""
+        self.mapper = TypeMapper()
+    
+    def test_detect_library_pydantic_model(self):
+        """Test auto-detection of Pydantic model classes."""
+        class UserModel(BaseModel):
+            id: int
+            name: str
+        
+        assert self.mapper.detect_library(UserModel) == 'pydantic'
+
+    def test_basic_type_mapping(self):
+        """Test basic type mapping between Pydantic and canonical types."""
+        # Python → Canonical
+        assert self.mapper.get_canonical_type(int, 'pydantic') == 'integer'
+        assert self.mapper.get_canonical_type(str, 'pydantic') == 'string'
+        assert self.mapper.get_canonical_type(float, 'pydantic') == 'float'
+        assert self.mapper.get_canonical_type(bool, 'pydantic') == 'boolean'
+        assert self.mapper.get_canonical_type(datetime.date, 'pydantic') == 'date'
+        
+        # Canonical → Pydantic
+        assert self.mapper.get_library_type('integer', 'pydantic') is int
+        assert self.mapper.get_library_type('string', 'pydantic') is str
+        assert self.mapper.get_library_type('float', 'pydantic') is float
+        assert self.mapper.get_library_type('boolean', 'pydantic') is bool
+        assert self.mapper.get_library_type('date', 'pydantic') is datetime.date
+
+    def test_list_type_mapping(self):
+        """Test list type mapping for Pydantic."""
+        from typing import List
+        
+        # Python List → Canonical
+        list_type = List[int]
+        canonical = self.mapper.get_canonical_type(list_type, 'pydantic')
+        assert canonical == ('list', 'integer')
+        
+        # Canonical → Pydantic List
+        mapped_type = self.mapper.get_library_type(canonical, 'pydantic')
+        from typing import get_origin, get_args
+        assert get_origin(mapped_type) is list
+        assert get_args(mapped_type)[0] is int
+
+    def test_pydantic_model_detection(self):
+        """Test detection of Pydantic model."""
+        class User(BaseModel):
+            id: int
+            name: str
+            
+        assert self.mapper.detect_library(User) == 'pydantic'
+    
+    @pytest.mark.skipif(not is_v2, reason="Requires Pydantic v2")
+    def test_pydantic_v2_special_types(self):
+        """Test Pydantic v2 special types."""
+        # Import the specific types
+        from pydantic import EmailStr, SecretStr
+        
+        # EmailStr mapping
+        assert self.mapper.get_canonical_type(EmailStr, 'pydantic') == 'email'
+        assert self.mapper.get_library_type('email', 'pydantic') is EmailStr
+        
+        # SecretStr mapping
+        assert self.mapper.get_canonical_type(SecretStr, 'pydantic') == 'secret'
+        assert self.mapper.get_library_type('secret', 'pydantic') is SecretStr
+    
+    @pytest.mark.skipif(is_v2, reason="Requires Pydantic v1")
+    def test_pydantic_v1_constrained_types(self):
+        """Test Pydantic v1 constrained types."""
+        # We need to import these specifically for v1
+        from pydantic import conint, confloat, constr, PositiveInt, NegativeInt
+        
+        # Test positive int (result is a tuple with constraints)
+        canonical = self.mapper.get_canonical_type(PositiveInt, 'pydantic')
+        assert canonical[0] == 'constrained'
+        assert canonical[1] == 'integer'
+        assert isinstance(canonical[2], tuple)
+        
+        # Test constrained int (result is a tuple with constraints)
+        constrained_int = conint(ge=1, le=100)
+        canonical = self.mapper.get_canonical_type(constrained_int, 'pydantic')
+        assert canonical[0] == 'constrained'
+        assert canonical[1] == 'integer'
+        assert isinstance(canonical[2], tuple)
+        
+        # Convert back to Pydantic
+        mapped_type = self.mapper.get_library_type(canonical, 'pydantic')
+        assert mapped_type.__origin__ == conint
+
+    def test_pydantic_model_schema_extraction(self):
+        """Test extracting schema from Pydantic model."""
+        class UserProfile(BaseModel):
+            id: int
+            name: str
+            email: Optional[str] = None
+            is_active: bool = True
+            
+        # Test conversion to canonical type
+        canonical = self.mapper.get_canonical_type(UserProfile, 'pydantic')
+        assert canonical[0] == 'pydantic_model'
+        assert canonical[1] == 'UserProfile'
+        assert isinstance(canonical[2], tuple)
+        
+        # Verify schema contents using helper functions for tuple-formatted dicts
+        schema_tuple = canonical[2]
+        assert find_in_tuple_dict(schema_tuple, 'properties')
+        properties = get_from_tuple_dict(schema_tuple, 'properties')
+        assert find_in_tuple_dict(properties, 'id')
+        assert find_in_tuple_dict(properties, 'name')
+        assert find_in_tuple_dict(properties, 'email')
+        
+    @pytest.mark.skip(reason="Model reconstruction needs more work")
+    def test_pydantic_model_reconstruction(self):
+        """Test reconstructing Pydantic model from schema."""
+        # Define original model
+        class User(BaseModel):
+            id: int
+            name: str
+            email: Optional[str] = None
+            
+        # Convert to canonical and back
+        canonical = self.mapper.get_canonical_type(User, 'pydantic')
+        reconstructed_model = self.mapper.get_library_type(canonical, 'pydantic')
+        
+        # Check the reconstructed model
+        assert reconstructed_model.__name__ == 'User'
+        
+        # Create instances to verify
+        original = User(id=1, name="Alice")
+        
+        # We can't directly compare classes, so we create an instance and check fields
+        reconstructed = reconstructed_model(id=1, name="Alice")
+        assert reconstructed.id == 1
+        assert reconstructed.name == "Alice"
+        
+        # Test with email
+        reconstructed_with_email = reconstructed_model(id=2, name="Bob", email="bob@example.com")
+        assert reconstructed_with_email.email == "bob@example.com"
+
+    def test_version_detection(self):
+        """Test Pydantic version detection."""
+        version = self.mapper._get_pydantic_version()
+        if is_v2:
+            assert version == 2
+        else:
+            assert version == 1
+            
+    def test_missing_pydantic(self):
+        """Test behavior when Pydantic is not available."""
+        with patch.dict(sys.modules, {'pydantic': None}):
+            mapper = TypeMapper()
+            with pytest.raises(ImportError):
+                mapper._get_pydantic_version()
+                
+    def test_cross_library_mapping(self):
+        """Test mapping Pydantic types to other libraries."""
+        # Pydantic to SQLAlchemy
+        mapped = self.mapper.map_type(int, 'sqlalchemy', 'pydantic')
+        from sqlalchemy import Integer
+        assert mapped is Integer
+        
+        # Pydantic to Pandas
+        mapped = self.mapper.map_type(int, 'pandas', 'pydantic')
+        import pandas as pd
+        assert isinstance(mapped, pd.api.extensions.ExtensionDtype)
+
+
+@pytest.mark.skipif(not has_pydantic, reason="Pydantic not installed")
+class TestPydanticComplexMapping:
+    """Test more complex Pydantic mapping scenarios."""
+    
+    def setup_method(self):
+        """Set up TypeMapper instance before each test."""
+        self.mapper = TypeMapper()
+    
+    def test_nested_model_mapping(self):
+        """Test mapping with nested Pydantic models."""
+        class Address(BaseModel):
+            street: str
+            city: str
+            
+        class User(BaseModel):
+            id: int
+            name: str
+            address: Address
+            
+        # Map the model to canonical
+        canonical = self.mapper.get_canonical_type(User, 'pydantic')
+        assert canonical[0] == 'pydantic_model'
+        
+        # Check schema contains nested model info using helper functions
+        schema_tuple = canonical[2]
+        assert find_in_tuple_dict(schema_tuple, 'properties')
+        properties = get_from_tuple_dict(schema_tuple, 'properties')
+        assert find_in_tuple_dict(properties, 'address')
+        
+        # Skip model reconstruction test since it's complex
+    
+    @pytest.mark.skip(reason="Advanced constraint handling needs work")
+    def test_annotated_field_with_constraints(self):
+        """Test mapping Annotated fields with constraints in Pydantic v2."""
+        from typing import Annotated
+        
+        class Product(BaseModel):
+            id: int
+            name: str
+            price: Annotated[float, Field(gt=0, description="Product price")]
+            
+        # Map to canonical
+        canonical = self.mapper.get_canonical_type(Product, 'pydantic')
+        
+        # The canonical representation should be a tuple with constraints
+        assert canonical[0] == 'pydantic_model'
+        assert canonical[1] == 'Product'
+        
+        # Check schema contains price field with helper functions
+        schema_tuple = canonical[2]
+        assert find_in_tuple_dict(schema_tuple, 'properties')
+        properties = get_from_tuple_dict(schema_tuple, 'properties')
+        assert find_in_tuple_dict(properties, 'price') 

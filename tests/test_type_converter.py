@@ -373,3 +373,312 @@ def test_pandera_converter_missing_pandera_error():
         
         with pytest.raises(ImportError):
             converter.convert({"id": 1, "name": "Alice"}) 
+
+import pytest
+from politipo import TypeConverter
+import sys
+from typing import List, Optional, Dict, Any
+from unittest.mock import patch
+
+# Check if Pydantic is installed
+try:
+    import pydantic
+    from pydantic import BaseModel, Field, EmailStr
+    has_pydantic = True
+    
+    # Check Pydantic version
+    is_v2 = hasattr(BaseModel, "model_dump")
+    if is_v2:
+        from typing import Annotated
+except ImportError:
+    has_pydantic = False
+    is_v2 = False
+
+
+@pytest.mark.skipif(not has_pydantic, reason="Pydantic not installed")
+class TestAdvancedPydanticTypeConverter:
+    """Test suite for advanced Pydantic functionality in TypeConverter."""
+    
+    def setup_method(self):
+        """Set up test models and sample data."""
+        # Define nested Pydantic models
+        class Address(BaseModel):
+            street: str
+            city: str
+            zip_code: str
+            
+        class User(BaseModel):
+            id: int
+            name: str
+            email: Optional[str] = None
+            address: Address
+            tags: List[str] = []
+            
+        self.Address = Address
+        self.User = User
+        
+        # Sample data
+        self.address_dict = {
+            "street": "123 Main St",
+            "city": "Anytown",
+            "zip_code": "12345"
+        }
+        
+        self.user_dict = {
+            "id": 1,
+            "name": "Alice",
+            "email": "alice@example.com",
+            "address": self.address_dict,
+            "tags": ["customer", "premium"]
+        }
+        
+        # Complex model with array of models
+        class Comment(BaseModel):
+            id: int
+            text: str
+            
+        class BlogPost(BaseModel):
+            id: int
+            title: str
+            content: str
+            comments: List[Comment] = []
+            
+        self.Comment = Comment
+        self.BlogPost = BlogPost
+        
+        self.blog_dict = {
+            "id": 1,
+            "title": "Hello World",
+            "content": "This is my first post",
+            "comments": [
+                {"id": 1, "text": "Great post!"},
+                {"id": 2, "text": "Thanks for sharing"}
+            ]
+        }
+    
+    def test_nested_pydantic_conversion(self):
+        """Test conversion with nested Pydantic models."""
+        converter = TypeConverter(from_type=dict, to_type=self.User)
+        user = converter.convert(self.user_dict)
+        
+        # Check user properties
+        assert user.id == 1
+        assert user.name == "Alice"
+        assert user.email == "alice@example.com"
+        
+        # Check nested address
+        assert isinstance(user.address, self.Address)
+        assert user.address.street == "123 Main St"
+        assert user.address.city == "Anytown"
+        assert user.address.zip_code == "12345"
+        
+        # Check array property
+        assert len(user.tags) == 2
+        assert user.tags[0] == "customer"
+        
+    def test_list_of_nested_models(self):
+        """Test conversion with a list of nested Pydantic models."""
+        converter = TypeConverter(from_type=dict, to_type=self.BlogPost)
+        blog = converter.convert(self.blog_dict)
+        
+        # Check blog properties
+        assert blog.id == 1
+        assert blog.title == "Hello World"
+        
+        # Check comments array
+        assert len(blog.comments) == 2
+        assert all(isinstance(comment, self.Comment) for comment in blog.comments)
+        assert blog.comments[0].id == 1
+        assert blog.comments[0].text == "Great post!"
+        
+    def test_round_trip_conversion(self):
+        """Test round-trip conversion with nested models."""
+        # Dict to model
+        to_model_converter = TypeConverter(from_type=dict, to_type=self.User)
+        user = to_model_converter.convert(self.user_dict)
+        
+        # Model to dict
+        to_dict_converter = TypeConverter(from_type=self.User, to_type=dict)
+        result_dict = to_dict_converter.convert(user)
+        
+        # Compare dictionaries (key by key to avoid serialization differences)
+        assert result_dict["id"] == self.user_dict["id"]
+        assert result_dict["name"] == self.user_dict["name"]
+        assert result_dict["email"] == self.user_dict["email"]
+        assert isinstance(result_dict["address"], dict)
+        assert result_dict["address"]["street"] == self.user_dict["address"]["street"]
+        
+    @pytest.mark.skipif(not is_v2, reason="Requires Pydantic v2")
+    def test_pydantic_v2_model_validation(self):
+        """Test Pydantic v2 model validation features."""
+        class ProductV2(BaseModel):
+            id: int
+            name: str
+            price: Annotated[float, Field(gt=0, description="Product price")]
+            
+        # Valid data
+        valid_data = {"id": 1, "name": "Test Product", "price": 29.99}
+        converter = TypeConverter(from_type=dict, to_type=ProductV2)
+        product = converter.convert(valid_data)
+        assert product.price == 29.99
+        
+        # Invalid data - should raise validation error with coerce=True
+        invalid_data = {"id": 1, "name": "Test Product", "price": -10.0}
+        converter = TypeConverter(from_type=dict, to_type=ProductV2)
+        with pytest.raises(Exception):
+            converter.convert(invalid_data, coerce=True)
+            
+    @pytest.mark.skipif(is_v2, reason="Requires Pydantic v1")
+    def test_pydantic_v1_model_validation(self):
+        """Test Pydantic v1 model validation features."""
+        from pydantic import validator
+        
+        class ProductV1(BaseModel):
+            id: int
+            name: str
+            price: float
+            
+            @validator('price')
+            def price_must_be_positive(cls, v):
+                if v <= 0:
+                    raise ValueError('Price must be positive')
+                return v
+                
+        # Valid data
+        valid_data = {"id": 1, "name": "Test Product", "price": 29.99}
+        converter = TypeConverter(from_type=dict, to_type=ProductV1)
+        product = converter.convert(valid_data)
+        assert product.price == 29.99
+        
+        # Invalid data - should raise validation error with coerce=True
+        invalid_data = {"id": 1, "name": "Test Product", "price": -10.0}
+        converter = TypeConverter(from_type=dict, to_type=ProductV1)
+        with pytest.raises(Exception):
+            converter.convert(invalid_data, coerce=True)
+            
+    def test_optional_nested_fields(self):
+        """Test handling of optional nested fields."""
+        class OptionalAddress(BaseModel):
+            street: Optional[str] = None
+            city: Optional[str] = None
+            
+        class OptionalUser(BaseModel):
+            id: int
+            name: str
+            address: Optional[OptionalAddress] = None
+            
+        # Test with address
+        data_with_address = {
+            "id": 1, 
+            "name": "Alice",
+            "address": {"street": "123 Main St", "city": "Anytown"}
+        }
+        
+        converter = TypeConverter(from_type=dict, to_type=OptionalUser)
+        user_with_address = converter.convert(data_with_address)
+        assert user_with_address.address is not None
+        assert user_with_address.address.street == "123 Main St"
+        
+        # Test without address
+        data_without_address = {
+            "id": 2,
+            "name": "Bob"
+        }
+        
+        user_without_address = converter.convert(data_without_address)
+        assert user_without_address.address is None
+        
+    def test_pydantic_version_detection(self):
+        """Test Pydantic version detection in TypeConverter."""
+        converter = TypeConverter(from_type=dict, to_type=self.User)
+        version = converter._get_pydantic_version()
+        
+        if is_v2:
+            assert version == 2
+        else:
+            assert version == 1
+            
+    def test_missing_pydantic(self):
+        """Test behavior when Pydantic is not available."""
+        with patch.dict(sys.modules, {'pydantic': None}):
+            converter = TypeConverter(from_type=dict, to_type=dict)
+            with pytest.raises(ImportError):
+                converter._get_pydantic_version()
+
+
+@pytest.mark.skipif(not has_pydantic, reason="Pydantic not installed")
+class TestPydanticDataFrameConversions:
+    """Test Pydantic conversion with DataFrames."""
+    
+    def setup_method(self):
+        """Set up test models and sample data."""
+        try:
+            import pandas as pd
+            import polars as pl
+            self.has_dataframes = True
+        except ImportError:
+            self.has_dataframes = False
+            return
+            
+        # Define model with various field types
+        class Product(BaseModel):
+            id: int
+            name: str
+            price: float
+            in_stock: bool
+            tags: List[str] = []
+            
+        self.Product = Product
+        
+        # Sample data
+        self.products = [
+            {"id": 1, "name": "Product A", "price": 19.99, "in_stock": True, "tags": ["new", "featured"]},
+            {"id": 2, "name": "Product B", "price": 29.99, "in_stock": False, "tags": ["clearance"]},
+            {"id": 3, "name": "Product C", "price": 39.99, "in_stock": True, "tags": []}
+        ]
+        
+    @pytest.mark.skipif(not has_pydantic, reason="Pydantic not installed")
+    def test_pydantic_to_pandas(self):
+        """Test conversion from list of Pydantic models to Pandas DataFrame."""
+        if not self.has_dataframes:
+            pytest.skip("Pandas not installed")
+            
+        import pandas as pd
+        
+        # Create Pydantic models
+        products = [self.Product(**p) for p in self.products]
+        
+        # Convert to DataFrame
+        converter = TypeConverter(from_type=self.Product, to_type=pd.DataFrame)
+        df = converter.convert(products)
+        
+        # Verify DataFrame
+        assert len(df) == 3
+        assert list(df.columns) == ["id", "name", "price", "in_stock", "tags"]
+        assert df.iloc[0]["id"] == 1
+        assert df.iloc[1]["name"] == "Product B"
+        assert df.iloc[2]["price"] == 39.99
+        
+    @pytest.mark.skipif(not has_pydantic, reason="Pydantic not installed")
+    def test_pandas_to_pydantic(self):
+        """Test conversion from Pandas DataFrame to list of Pydantic models."""
+        if not self.has_dataframes:
+            pytest.skip("Pandas not installed")
+            
+        import pandas as pd
+        
+        # Create DataFrame
+        df = pd.DataFrame(self.products)
+        
+        # Convert to Pydantic models
+        converter = TypeConverter(from_type=pd.DataFrame, to_type=self.Product)
+        products = converter.convert(df)
+        
+        # Verify models
+        assert len(products) == 3
+        assert all(isinstance(p, self.Product) for p in products)
+        assert products[0].id == 1
+        assert products[1].name == "Product B"
+        assert products[2].price == 39.99
+        assert not products[1].in_stock
+        assert len(products[0].tags) == 2 
