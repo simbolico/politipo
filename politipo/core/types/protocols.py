@@ -58,6 +58,25 @@ class TypeSystem(Protocol):
         """
         pass
 
+    @abstractmethod
+    def get_default_canonical(self) -> "CanonicalType":
+        """
+        Returns a default/generic CanonicalType for this system.
+        
+        Returns:
+            A CanonicalType representing the most generic/default type for this system.
+            For example:
+            - Pandas: DataFrame with no columns
+            - Pydantic: dict
+            - Python: Any
+            - SQLModel: SQLModel base class
+            - Polars: DataFrame with no columns
+        
+        This is used when the target is specified only as a string system name,
+        without any specific type information.
+        """
+        pass
+
 
 @runtime_checkable
 class ConstraintProtocol(Protocol):

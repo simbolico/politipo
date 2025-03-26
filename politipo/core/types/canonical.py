@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Literal, Dict, Any, Optional, List
-from .abstract import Constraint, TypeMeta
+from .abstract import Constraint, SimpleTypeMeta
 
 
 @dataclass(frozen=True)
@@ -10,7 +10,7 @@ class CanonicalType:
     name: str  # e.g., "int", "DataFrame", "List"
     params: Dict[str, Any] = field(default_factory=dict)
     constraints: Dict[str, Constraint] = field(default_factory=dict)
-    meta: Optional[TypeMeta] = None
+    meta: Optional[SimpleTypeMeta] = None
 
     def __post_init__(self):
         self._validate()

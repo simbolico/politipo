@@ -1,46 +1,39 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from politipo.core.types import CanonicalType
-    from politipo.core.conversion.engine import ConversionContext
+from typing import Any
+from politipo.core.types import CanonicalType
+from politipo.core.conversion.context import ConversionContext
 
 
 class ConversionStrategy(ABC):
-    """Base class for all type conversion strategies."""
+    """Base class for type conversion strategies."""
 
     @abstractmethod
-    def can_handle(
-        self, 
-        source: "CanonicalType", 
-        target: "CanonicalType"
-    ) -> bool:
+    def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
         """
-        Whether this strategy can handle the conversion.
-        
+        Check if this strategy can handle the conversion.
+
         Args:
-            source: Source type to convert from
-            target: Target type to convert to
-            
+            source: Source canonical type
+            target: Target canonical type
+
         Returns:
             True if this strategy can handle the conversion
         """
         pass
 
     @abstractmethod
-    def convert(
-        self, 
-        value: Any,
-        context: "ConversionContext"
-    ) -> Any:
+    def convert(self, value: Any, context: ConversionContext) -> Any:
         """
-        Perform the actual conversion.
-        
+        Convert a value using this strategy.
+
         Args:
             value: The value to convert
-            context: Conversion context with type information
-            
+            context: Conversion context with source/target types and settings
+
         Returns:
             The converted value
+
+        Raises:
+            ConversionError: If conversion fails
         """
         pass 
