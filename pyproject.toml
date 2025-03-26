@@ -5,6 +5,8 @@ description = "A library for seamless type conversions between Python data struc
 authors = [{ name = "Kevin Saltarelli", email = "kevinqz@gmail.com" }]
 requires-python = ">=3.11"
 dependencies = [
+    "numpy>=2.2.4",
     "pandas>=2.2.3",
+    "pandera>=0.23.1",
     "pydantic>=2.10.6",
 ]

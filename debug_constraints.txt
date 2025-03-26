@@ -1,0 +1,178 @@
+Importing required modules...
+Imports successful
+
+=== Model field info ===
+name field constraints:
+  Field has no constraints attribute: annotation=str required=True metadata=[MinLen(min_length=2), MaxLen(max_length=50)]
+  Field attributes: ['__annotations__', '__class__', '__delattr__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__pretty__', '__reduce__', '__reduce_ex__', '__repr__', '__repr_args__', '__repr_name__', '__repr_recursion__', '__repr_str__', '__rich_repr__', '__setattr__', '__sizeof__', '__slotnames__', '__slots__', '__str__', '__subclasshook__', '_attributes_set', '_collect_metadata', '_extract_metadata', '_from_dataclass_field', 'alias', 'alias_priority', 'annotation', 'apply_typevars_map', 'default', 'default_factory', 'default_factory_takes_validated_data', 'deprecated', 'deprecation_message', 'description', 'discriminator', 'evaluated', 'examples', 'exclude', 'field_title_generator', 'from_annotated_attribute', 'from_annotation', 'from_field', 'frozen', 'get_default', 'init', 'init_var', 'is_required', 'json_schema_extra', 'kw_only', 'merge_field_infos', 'metadata', 'metadata_lookup', 'rebuild_annotation', 'repr', 'serialization_alias', 'title', 'validate_default', 'validation_alias']
+age field constraints:
+  Field has no constraints attribute: annotation=int required=True metadata=[Ge(ge=18), Le(le=120)]
+  Field attributes: ['__annotations__', '__class__', '__delattr__', '__dir__', '__doc__', '__eq__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__pretty__', '__reduce__', '__reduce_ex__', '__repr__', '__repr_args__', '__repr_name__', '__repr_recursion__', '__repr_str__', '__rich_repr__', '__setattr__', '__sizeof__', '__slotnames__', '__slots__', '__str__', '__subclasshook__', '_attributes_set', '_collect_metadata', '_extract_metadata', '_from_dataclass_field', 'alias', 'alias_priority', 'annotation', 'apply_typevars_map', 'default', 'default_factory', 'default_factory_takes_validated_data', 'deprecated', 'deprecation_message', 'description', 'discriminator', 'evaluated', 'examples', 'exclude', 'field_title_generator', 'from_annotated_attribute', 'from_annotation', 'from_field', 'frozen', 'get_default', 'init', 'init_var', 'is_required', 'json_schema_extra', 'kw_only', 'merge_field_infos', 'metadata', 'metadata_lookup', 'rebuild_annotation', 'repr', 'serialization_alias', 'title', 'validate_default', 'validation_alias']
+
+=== Creating dummy constraints for testing ===
+min_length: MinLength(value=2) (<class 'politipo.core.types.constraints.MinLength'>)
+min_length.value: 2
+min_length has 'get' method: False
+min_length.__dict__: {'value': 2}
+max_length: MaxLength(value=50) (<class 'politipo.core.types.constraints.MaxLength'>)
+max_value: MaxValue(value=120) (<class 'politipo.core.types.constraints.MaxValue'>)
+min_value: MinValue(value=18) (<class 'politipo.core.types.constraints.MinValue'>)
+
+=== Creating Pandera schema via Politipo ===
+
+=== Examining _canonical_to_series method ===
+    def _canonical_to_series(self, canonical: CanonicalType) -> pa.SeriesSchema:
+        """Convert CanonicalType to SeriesSchema."""
+        if canonical.kind != "primitive":
+            raise ConversionError("Series canonical type must be primitive")
+
+        meta = canonical.meta.data if canonical.meta else {}
+        constraints = canonical.constraints or {}
+        
+        # Extract parameters using a compatibility approach
+        kwargs = {
+            "dtype": meta.get("pandas_dtype", "object"),
+            "nullable": constraints.get("nullable"),
+            "unique": constraints.get("unique"),
+            "coerce": constraints.get("coerce"),
+        }
+        
+        # Remove None values to avoid unexpected keyword argument errors
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
+        # Convert constraints to checks
+        checks = []
+        for constraint_name, constraint_data in constraints.items():
+            if constraint_name in ("nullable", "unique", "coerce"):
+                continue
+                
+            # Handle pattern constraint specifically
+            if constraint_name == "pattern" and constraint_data:
+                try:
+                    # Add pattern as a str_matches check
+                    pattern = constraint_data if isinstance(constraint_data, str) else constraint_data.get("pattern", "")
+                    if pattern:
+                        checks.append(pa.Check.str_matches(pattern))
+                except Exception as e:
+                    # Log warning or handle error as needed
+                    print(f"Warning: Failed to add pattern check: {e}")
+                continue
+                
+            # Handle min_length constraint
+            if constraint_name == "MinLength" and constraint_data:
+                try:
+                    # Extract value correctly based on whether it's a dict or a Constraint object
+                    min_value = None
+                    if hasattr(constraint_data, 'value'):
+                        min_value = constraint_data.value
+                    elif isinstance(constraint_data, dict) and 'value' in constraint_data:
+                        min_value = constraint_data['value']
+                    elif isinstance(constraint_data, (int, float)):
+                        min_value = constraint_data
+                        
+                    if min_value is not None:
+                        checks.append(pa.Check.str_length(min_value=min_value))
+                except Exception as e:
+                    print(f"Warning: Failed to add min_length check: {e}")
+                continue
+                
+            # Handle max_length constraint
+            if constraint_name == "MaxLength" and constraint_data:
+                try:
+                    # Extract value correctly
+                    max_value = None
+                    if hasattr(constraint_data, 'value'):
+                        max_value = constraint_data.value
+                    elif isinstance(constraint_data, dict) and 'value' in constraint_data:
+                        max_value = constraint_data['value']
+                    elif isinstance(constraint_data, (int, float)):
+                        max_value = constraint_data
+                        
+                    if max_value is not None:
+                        checks.append(pa.Check.str_length(max_value=max_value))
+                except Exception as e:
+                    print(f"Warning: Failed to add max_length check: {e}")
+                continue
+                
+            # Handle min_value (ge) constraint
+            if constraint_name == "MinValue" and constraint_data:
+                try:
+                    # Extract value correctly
+                    min_value = None
+                    if hasattr(constraint_data, 'value'):
+                        min_value = constraint_data.value
+                    elif isinstance(constraint_data, dict) and 'value' in constraint_data:
+                        min_value = constraint_data['value']
+                    elif isinstance(constraint_data, (int, float)):
+                        min_value = constraint_data
+                        
+                    if min_value is not None:
+                        checks.append(pa.Check.in_range(min_value=min_value))
+                except Exception as e:
+                    print(f"Warning: Failed to add min_value check: {e}")
+                continue
+                
+            # Handle max_value (le) constraint
+            if constraint_name == "MaxValue" and constraint_data:
+                try:
+                    # Extract value correctly
+                    max_value = None
+                    if hasattr(constraint_data, 'value'):
+                        max_value = constraint_data.value
+                    elif isinstance(constraint_data, dict) and 'value' in constraint_data:
+                        max_value = constraint_data['value']
+                    elif isinstance(constraint_data, (int, float)):
+                        max_value = constraint_data
+                        
+                    if max_value is not None:
+                        checks.append(pa.Check.in_range(max_value=max_value))
+                except Exception as e:
+                    print(f"Warning: Failed to add max_value check: {e}")
+                continue
+                
+            try:
+                # General approach for other constraints
+                constraint_dict = {"type": constraint_name}
+                if isinstance(constraint_data, dict):
+                    constraint_dict.update(constraint_data)
+                else:
+                    constraint_dict["value"] = constraint_data
+                
+                constraint = constraint_from_dict(constraint_dict)
+                if constraint:
+                    check = self._constraint_to_pandera_check(constraint)
+                    if check:
+                        checks.append(check)
+            except Exception as e:
+                # Log warning or handle error as needed
+                print(f"Warning: Failed to convert constraint {constraint_name}: {e}")
+                continue
+
+        # Add checks to kwargs only if they exist
+        if checks:
+            kwargs["checks"] = checks
+        
+        # Add metadata if it exists
+        if meta.get("custom_metadata"):
+            kwargs["metadata"] = meta.get("custom_metadata")
+        
+        try:
+            # Create series schema with validated kwargs
+            return pa.SeriesSchema(**kwargs)
+        except Exception as e:
+            # If that fails, try a minimal approach
+            print(f"Warning: Error creating full SeriesSchema: {e}")
+            return pa.SeriesSchema(dtype=kwargs.get("dtype", "object"))
+
+
+=== Converting model to schema ===
+Initializing type systems for conversion of TestModel
+Converting TestModel to canonical type representation
+Converting canonical type to Pandera schema
+Warning: Failed to add min_length check for column 'name': 'MinLength' object has no attribute 'get'
+Warning: Failed to add max_length check for column 'name': 'MaxLength' object has no attribute 'get'
+Warning: Failed to add min_value check for column 'age': 'MinValue' object has no attribute 'get'
+Warning: Failed to add max_value check for column 'age': 'MaxValue' object has no attribute 'get'
+Schema created: <class 'pandera.api.pandas.container.DataFrameSchema'>
+Columns: ['name', 'age']
+Validation successful

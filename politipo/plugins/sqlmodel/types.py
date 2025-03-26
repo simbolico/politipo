@@ -1,12 +1,21 @@
-from typing import Any, Dict, Type
+from typing import Any, Dict, Type, Optional, List, Union, Tuple
 from functools import lru_cache
+import inspect
 
 try:
-    from sqlmodel import SQLModel
+    from sqlmodel import SQLModel, Field
+    from sqlalchemy import Column, Index, Table, MetaData
+    from sqlalchemy.orm import relationship
     from pydantic.fields import FieldInfo
     # Attempt to import other relevant SQLModel parts if needed for detection/mapping
 except ImportError:
     SQLModel = None
+    Field = None
+    Column = None
+    Index = None
+    Table = None
+    MetaData = None
+    relationship = None
     FieldInfo = None
     # Allow type checking
 
@@ -64,7 +73,7 @@ class SQLModelTypeSystem(TypeSystem):
             "is_sqlmodel": True,
         }
         # Table name
-        sql_meta_data['sql_tablename'] = getattr(type_obj, '__tablename__', type_obj.__name__.lower())  # Default convention
+        sql_meta_data['sql_tablename'] = getattr(type_obj, '__tablename__', type_obj.__name__.lower())
 
         # Primary Keys (Check Pydantic fields for primary_key=True)
         pk_names = []
@@ -85,7 +94,11 @@ class SQLModelTypeSystem(TypeSystem):
             if isinstance(table_args, tuple):
                 for arg in table_args:
                     if hasattr(arg, '__visit_name__') and arg.__visit_name__ == 'index':
-                        sql_meta_data['sql_indexes'].append(str(arg))
+                        sql_meta_data['sql_indexes'].append({
+                            'name': arg.name,
+                            'columns': [col.name for col in arg.columns],
+                            'unique': arg.unique
+                        })
         except Exception:
             pass  # Ignore errors extracting indexes
 
@@ -118,8 +131,99 @@ class SQLModelTypeSystem(TypeSystem):
 
     @lru_cache(maxsize=128)
     def from_canonical(self, canonical: CanonicalType) -> Type[SQLModel]:
-        """Dynamic SQLModel creation is not supported yet."""
-        raise NotImplementedError("Dynamic SQLModel reconstruction from CanonicalType is complex and not yet supported.")
+        """
+        Reconstruct a SQLModel class from CanonicalType.
+        
+        Args:
+            canonical: The canonical type representation
+            
+        Returns:
+            A dynamically created SQLModel class
+            
+        Raises:
+            ConversionError: If reconstruction fails
+        """
+        if canonical.kind != "composite":
+            raise ConversionError(f"Cannot create SQLModel from non-composite type: {canonical.kind}")
+
+        meta = canonical.meta.data if canonical.meta else {}
+        if not meta.get("is_sqlmodel", False):
+            raise ConversionError("Canonical type does not represent a SQLModel")
+
+        try:
+            # 1. Get base Pydantic model from canonical
+            base_model_class = self._pydantic_system.from_canonical(canonical)
+        except Exception as e:
+            raise ConversionError(f"Failed to create base Pydantic model: {e}") from e
+
+        # 2. Extract SQL metadata
+        tablename = meta.get('sql_tablename', canonical.name.lower())
+        primary_keys = meta.get('sql_primary_key', [])
+        indexes = meta.get('sql_indexes', [])
+        relationships = meta.get('sql_relationships', {})
+
+        # 3. Prepare model attributes
+        model_attrs = {
+            "__tablename__": tablename,
+            "_sa_table_args": self._build_table_args(indexes),
+        }
+
+        # 4. Process fields to add SQLModel-specific attributes
+        fields = canonical.params.get("fields", {})
+        for name, field_info in fields.items():
+            field_meta = field_info.get("meta", {})
+            field_constraints = field_info.get("constraints", {})
+
+            # Get the field from the base model
+            if hasattr(base_model_class, name):
+                base_field = getattr(base_model_class, name)
+                field_type = base_field.annotation if hasattr(base_field, 'annotation') else Any
+
+                # Create SQLModel Field with SQL-specific attributes
+                field_kwargs = {}
+                
+                # Handle primary key
+                if name in primary_keys:
+                    field_kwargs['primary_key'] = True
+
+                # Handle foreign keys if present in constraints
+                if 'foreign_key' in field_constraints:
+                    field_kwargs['foreign_key'] = field_constraints['foreign_key']
+
+                # Handle nullable/optional
+                field_kwargs['nullable'] = not field_info.get('required', True)
+
+                # Handle default value
+                if 'default' in field_info:
+                    field_kwargs['default'] = field_info['default']
+
+                # Create the SQLModel Field
+                model_attrs[name] = Field(
+                    default=field_info.get('default', ...),
+                    **field_kwargs
+                )
+
+        # 5. Add relationships
+        for rel_name, rel_info in relationships.items():
+            rel_kwargs = {
+                'back_populates': rel_info.get('back_populates'),
+                'uselist': rel_info.get('uselist', True)
+            }
+            # Filter out None values
+            rel_kwargs = {k: v for k, v in rel_kwargs.items() if v is not None}
+            
+            model_attrs[rel_name] = relationship(rel_info['target'], **rel_kwargs)
+
+        # 6. Create the SQLModel class
+        try:
+            model_class = type(canonical.name, (SQLModel,), model_attrs)
+            
+            # Mark as table model
+            setattr(model_class, '__table__', True)
+            
+            return model_class
+        except Exception as e:
+            raise ConversionError(f"Failed to create SQLModel class: {e}") from e
 
     def detect(self, obj: Any) -> bool:
         """Returns True if obj is a SQLModel class."""
@@ -128,6 +232,25 @@ class SQLModelTypeSystem(TypeSystem):
             isinstance(obj, type) and
             issubclass(obj, SQLModel)
         )
+
+    def _build_table_args(self, indexes: List[Dict]) -> Tuple:
+        """Build SQLAlchemy table arguments from metadata."""
+        table_args = []
+        
+        # Create Index objects
+        for idx in indexes:
+            try:
+                table_args.append(
+                    Index(
+                        idx.get('name'),
+                        *idx.get('columns', []),
+                        unique=idx.get('unique', False)
+                    )
+                )
+            except Exception:
+                continue  # Skip invalid indexes
+
+        return tuple(table_args)
 
     # @property
     # def pydantic_system(self) -> PydanticTypeSystem:

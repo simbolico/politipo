@@ -44,7 +44,7 @@ from politipo.core.errors import ConversionError, PolitipoError
 from politipo.core.types.constraints import (
     MinValue, MaxValue, MinLength, MaxLength,
     GreaterThan, LessThan, GreaterThanOrEqual, LessThanOrEqual,
-    Pattern, MultipleOf, Constraint
+    Pattern, MultipleOf, OneOf, Constraint
 )
 # Import PythonTypeSystem to delegate primitive/container mapping
 from politipo.plugins.python import PythonTypeSystem
@@ -60,6 +60,7 @@ _PYDANTIC_CONSTRAINT_MAP = {
     'max_length': MaxLength,
     'pattern': Pattern,
     'multiple_of': MultipleOf,
+    'allowed_values': OneOf,  # Add OneOf mapping
     # Annotated types specific mapping (ensure correct class is checked)
     Gt: GreaterThan,
     Ge: MinValue,
@@ -102,10 +103,11 @@ class PydanticTypeSystem(TypeSystem):
              return CanonicalType(kind="primitive", name="str", params={"format": "email"})
         if type_obj is SecretStr:
              return CanonicalType(kind="primitive", name="str", params={"format": "secret"})
+        # Add more specific Pydantic types here (UUID, Url, etc.)
 
         # Handle Pydantic Model Classes
         if isinstance(type_obj, type) and issubclass(type_obj, BaseModel):
-            fields_canonical = {}
+            fields = {}
             model_fields_dict = {}
             required_set = set()
 
@@ -120,70 +122,39 @@ class PydanticTypeSystem(TypeSystem):
                      raise ConversionError(f"Cannot inspect fields for Pydantic model {type_obj}")
 
             for name, field in model_fields_dict.items():
+                # Delegate type conversion (handles primitives, containers, nested models)
+                # Need field.annotation (v2) or field.outer_type_ (v1)
                 field_annotation = getattr(field, 'annotation', getattr(field, 'outer_type_', Any))
                 field_type_canonical = self._map_pydantic_annotation_to_canonical(field_annotation)
+
+                # Extract constraints
                 constraints = self._extract_constraints(field)
 
-                # Extract default value
-                default_value = ...  # Ellipsis represents no default set
-                if _PYDANTIC_V2:
-                    # In v2, default is directly on FieldInfo
-                    raw_default = getattr(field, 'default', PydanticUndefined)
-                    if raw_default is not PydanticUndefined:
-                        default_value = raw_default
-                else:
-                    # In v1, default is on field_info within ModelField
-                    field_info_v1 = getattr(field, 'field_info', None)
-                    if field_info_v1:
-                       raw_default = getattr(field_info_v1, 'default', ...)
-                       if raw_default is not ...:
-                           default_value = raw_default
-
-                fields_canonical[name] = {
+                fields[name] = {
                     "type": field_type_canonical,
                     "constraints": constraints,
                     "required": name in required_set,
-                    "default": default_value,
+                    # Add default value, description etc. if needed
                     "description": getattr(field, 'description', None),
                 }
 
-            # Extract model config
-            model_config_dict = {}
-            if _PYDANTIC_V2:
-                # Pydantic v2 stores config in model_config attribute (dict)
-                cfg = getattr(type_obj, 'model_config', {})
-                if cfg:
-                    try:
-                       # Only store serializable config for broader compatibility
-                       model_config_dict = json.loads(json.dumps(cfg))
-                    except TypeError:
-                        model_config_dict = {"error": "Config not JSON serializable"}
-            else:
-                # Pydantic v1 uses a Config class
-                config_class = getattr(type_obj, 'Config', None)
-                if config_class:
-                    model_config_dict = {
-                        key: getattr(config_class, key)
-                        for key in dir(config_class)
-                        if not key.startswith('_') and not callable(getattr(config_class, key))
-                    }
-
-            # Extract model docstring for description
-            model_description = inspect.getdoc(type_obj)
-
-            meta_data = {
-                "origin_system": self.name,
-                "pydantic_config": model_config_dict,
-                "description": model_description,
-            }
-
             # Store full schema for reconstruction fidelity
             try:
-                schema = type_obj.model_json_schema() if _PYDANTIC_V2 else type_obj.schema()
-                params = {"fields": fields_canonical, "json_schema_str": json.dumps(schema)}
+                 schema = type_obj.model_json_schema() if _PYDANTIC_V2 else type_obj.schema()
+                 # Convert schema to tuple for hashability if used directly in params
+                 # params = {"fields": fields, "json_schema_tuple": self._dict_to_tuple(schema)}
+                 # Storing as string is simpler for caching
+                 params = {"fields": fields, "json_schema_str": json.dumps(schema)}
             except Exception:
-                # Fallback if schema generation fails
-                params = {"fields": fields_canonical}
+                 # Fallback if schema generation fails
+                 params = {"fields": fields}
+
+            # Create metadata with schema_type for Pandera compatibility
+            meta_data = {
+                "origin_system": self.name,
+                "schema_type": "dataframe",  # Set schema_type to dataframe for Pydantic models
+                "model_name": type_obj.__name__
+            }
 
             return CanonicalType(
                 kind="composite",
@@ -249,65 +220,111 @@ class PydanticTypeSystem(TypeSystem):
 
     @lru_cache(maxsize=128)
     def from_canonical(self, canonical: CanonicalType) -> Type:
-        """Reconstructs a Pydantic type or model from CanonicalType."""
+        """
+        Reconstructs a Pydantic type or model from CanonicalType.
 
-        # Handle Pydantic Model reconstruction from full schema if available
-        if canonical.kind == "composite" and "json_schema_str" in canonical.params:
-            try:
-                schema_dict = json.loads(canonical.params["json_schema_str"])
-                # Requires a helper function similar to TypeMapper._create_pydantic_model_from_schema
-                return self._create_model_from_schema(canonical.name, schema_dict)
-            except Exception:
-                 # Fallback to field-based reconstruction if schema fails
-                 pass # Continue to logic below
+        Args:
+            canonical: The canonical type representation to convert.
 
+        Returns:
+            A Pydantic type (for primitives/containers) or model class (for composites).
+
+        Raises:
+            ConversionError: If reconstruction fails or required data is missing.
+        """
         # Handle Pydantic Model reconstruction from fields
         if canonical.kind == "composite":
-            fields_def = {}
-            field_params = canonical.params.get("fields", {})
-            if not field_params: # Cannot reconstruct without fields
-                 raise ConversionError(f"Cannot reconstruct Pydantic model '{canonical.name}' without field definitions in params.")
+            fields_info = canonical.params.get("fields")
+            if not fields_info:
+                raise ConversionError(f"Cannot reconstruct Pydantic model '{canonical.name}' without field definitions.")
 
-            for name, field_info in field_params.items():
-                field_type_canonical = field_info["type"]
-                py_type = self._canonical_to_pydantic_type(field_type_canonical)
+            fields_for_create_model = {}
+            for name, field_info in fields_info.items():
+                try:
+                    # Get field type
+                    field_type_canonical = field_info["type"]
+                    py_type = self._canonical_to_pydantic_type(field_type_canonical)
 
-                constraints = field_info.get("constraints", {})
-                field_kwargs = self._constraints_to_field_kwargs(constraints)
+                    # Get constraints and convert to field kwargs
+                    constraints = field_info.get("constraints", {})
+                    field_kwargs = self._constraints_to_field_kwargs(constraints)
 
-                if 'description' in field_info:
-                     field_kwargs['description'] = field_info['description']
+                    # Add description if present
+                    if field_info.get('description'):
+                        field_kwargs['description'] = field_info['description']
 
-                # Handle optional vs required
-                is_required = field_info.get("required", True)
-                if is_required:
-                    # Field(...) implies required unless default is set
-                    if not field_kwargs:
-                         fields_def[name] = (py_type, ...) # Ellipsis means required
+                    # Handle required/optional and defaults
+                    is_required = field_info.get('required', True)
+                    default_value = field_info.get('default', ...)
+
+                    if is_required:
+                        # Required fields might still have defaults in Pydantic
+                        current_default = default_value if default_value is not ... else ...
+                        field_definition = Field(default=current_default, **field_kwargs)
                     else:
-                         fields_def[name] = (py_type, Field(..., **field_kwargs))
-                else:
-                    # Make it Optional[py_type] and provide default None
-                    # Note: py_type might already be Optional if derived from Optional[T]
-                    if get_origin(py_type) is not Union or type(None) not in get_args(py_type):
-                         py_type = Optional[py_type]
-                    # Set default to None unless another default exists in kwargs
-                    field_kwargs.setdefault('default', None)
-                    fields_def[name] = (py_type, Field(**field_kwargs))
+                        # Optional field: Ensure type hint is Optional and default is None unless specified
+                        if get_origin(py_type) is not Union or type(None) not in get_args(py_type):
+                            py_type = Optional[py_type]
+                        # Use canonical default if provided, otherwise default optional fields to None
+                        final_default = default_value if default_value is not ... else None
+                        field_definition = Field(default=final_default, **field_kwargs)
 
-            return create_model(canonical.name, **fields_def)
+                    fields_for_create_model[name] = (py_type, field_definition)
+
+                except Exception as e:
+                    raise ConversionError(f"Error processing field '{name}' for Pydantic model '{canonical.name}': {e}") from e
+
+            # Handle Model Config
+            config_dict = canonical.meta.get('pydantic_config') if canonical.meta else None
+            config_kwarg = {}
+            if config_dict:
+                if _PYDANTIC_V2:
+                    # For v2, pass model_config directly
+                    config_kwarg['model_config'] = config_dict
+                else:
+                    # For v1, create Config class
+                    config_kwarg['__config__'] = type('Config', (), config_dict)
+
+            try:
+                # Create the model
+                model = create_model(
+                    canonical.name,
+                    **fields_for_create_model,
+                    **config_kwarg
+                )
+                # Add model docstring if available
+                if canonical.meta and canonical.meta.get('description'):
+                    model.__doc__ = canonical.meta.get('description')
+                return model
+            except Exception as e:
+                raise ConversionError(f"Failed to create Pydantic model '{canonical.name}': {e}") from e
 
         # Handle Container Types
         if canonical.kind == "container":
-            container_map: Dict[str, Type] = {"list": List, "tuple": Tuple, "set": Set, "frozenset": FrozenSet, "dict": Dict}
+            container_map: Dict[str, Type] = {
+                "list": List, "tuple": Tuple, "set": Set, 
+                "frozenset": FrozenSet, "dict": Dict
+            }
             if canonical.name in container_map:
                 container = container_map[canonical.name]
                 if canonical.name == "dict":
-                    key_type = self._canonical_to_pydantic_type(canonical.params.get("key_type", CanonicalType(kind="primitive", name="any")))
-                    value_type = self._canonical_to_pydantic_type(canonical.params.get("value_type", CanonicalType(kind="primitive", name="any")))
+                    key_type = self._canonical_to_pydantic_type(
+                        canonical.params.get("key_type", 
+                            CanonicalType(kind="primitive", name="any")
+                        )
+                    )
+                    value_type = self._canonical_to_pydantic_type(
+                        canonical.params.get("value_type", 
+                            CanonicalType(kind="primitive", name="any")
+                        )
+                    )
                     return container[key_type, value_type]
                 else:
-                    item_type = self._canonical_to_pydantic_type(canonical.params.get("item_type", CanonicalType(kind="primitive", name="any")))
+                    item_type = self._canonical_to_pydantic_type(
+                        canonical.params.get("item_type", 
+                            CanonicalType(kind="primitive", name="any")
+                        )
+                    )
                     return container[item_type]
 
         # Handle Primitive Types (including special formats)
@@ -365,7 +382,7 @@ class PydanticTypeSystem(TypeSystem):
         if field is None: return constraints
 
         # Common attributes/metadata keys
-        constraint_keys = ['gt', 'ge', 'lt', 'le', 'min_length', 'max_length', 'pattern', 'multiple_of']
+        constraint_keys = ['gt', 'ge', 'lt', 'le', 'min_length', 'max_length', 'pattern', 'multiple_of', 'allowed_values']
 
         # Pydantic v2: Constraints often in metadata or direct attributes
         if _PYDANTIC_V2 and isinstance(field, FieldInfo):
@@ -389,7 +406,10 @@ class PydanticTypeSystem(TypeSystem):
                      # Pydantic v2 uses PydanticUndefined for unset values
                      if value is not None and value is not PydanticUndefined:
                           constraint_cls = _PYDANTIC_CONSTRAINT_MAP[key]
-                          constraints[constraint_cls.__name__] = constraint_cls(value=value)
+                          if key == 'allowed_values':
+                              constraints[constraint_cls.__name__] = constraint_cls(allowed_values=value)
+                          else:
+                              constraints[constraint_cls.__name__] = constraint_cls(value=value)
 
         # Pydantic v1: Constraints often direct attributes on ModelField or in field.type_.__constraints__
         elif not _PYDANTIC_V2 and isinstance(field, ModelField):
@@ -398,64 +418,56 @@ class PydanticTypeSystem(TypeSystem):
                        value = getattr(field.field_info, key, None) # Constraints are on field_info in v1
                        if value is not None:
                             constraint_cls = _PYDANTIC_CONSTRAINT_MAP[key]
-                            constraints[constraint_cls.__name__] = constraint_cls(value=value)
+                            if key == 'allowed_values':
+                                constraints[constraint_cls.__name__] = constraint_cls(allowed_values=value)
+                            else:
+                                constraints[constraint_cls.__name__] = constraint_cls(value=value)
              # Also check __constraints__ on the type itself (e.g., for conint)
              if hasattr(field.type_, '__constraints__'):
-                 pyd_constraints = field.type_.__constraints__
-                 for key, value in pyd_constraints.items():
-                      if key in _PYDANTIC_CONSTRAINT_MAP and value is not None:
-                           constraint_cls = _PYDANTIC_CONSTRAINT_MAP[key]
-                           constraints[constraint_cls.__name__] = constraint_cls(value=value)
+                 for constraint in field.type_.__constraints__:
+                     # Handle Pydantic v1 constraint objects
+                     if hasattr(constraint, 'allowed_values'):
+                         constraints['OneOf'] = OneOf(allowed_values=constraint.allowed_values)
+                     elif hasattr(constraint, 'gt'):
+                         constraints['GreaterThan'] = GreaterThan(value=constraint.gt)
+                     elif hasattr(constraint, 'ge'):
+                         constraints['MinValue'] = MinValue(value=constraint.ge)
+                     elif hasattr(constraint, 'lt'):
+                         constraints['LessThan'] = LessThan(value=constraint.lt)
+                     elif hasattr(constraint, 'le'):
+                         constraints['MaxValue'] = MaxValue(value=constraint.le)
+                     elif hasattr(constraint, 'min_length'):
+                         constraints['MinLength'] = MinLength(value=constraint.min_length)
+                     elif hasattr(constraint, 'max_length'):
+                         constraints['MaxLength'] = MaxLength(value=constraint.max_length)
+                     elif hasattr(constraint, 'pattern'):
+                         constraints['Pattern'] = Pattern(pattern=constraint.pattern)
+                     elif hasattr(constraint, 'multiple_of'):
+                         constraints['MultipleOf'] = MultipleOf(value=constraint.multiple_of)
 
         return constraints
 
 
     def _constraints_to_field_kwargs(self, constraints: Dict[str, Constraint]) -> Dict[str, Any]:
-        """Convert core constraints back to Pydantic Field kwargs."""
+        """Convert constraints back to Pydantic field kwargs."""
         kwargs = {}
-        # Inverse mapping (Core Constraint -> Pydantic Kwarg name)
-        # Note: MinValue maps to 'ge', MaxValue maps to 'le'
-        inverse_map = {
-            GreaterThan: 'gt', MinValue: 'ge', LessThan: 'lt', MaxValue: 'le',
-            MinLength: 'min_length', MaxLength: 'max_length', Pattern: 'pattern',
-            MultipleOf: 'multiple_of',
-            # Map GreaterThanOrEqual back to ge, LessThanOrEqual back to le
-            GreaterThanOrEqual: 'ge', LessThanOrEqual: 'le',
-        }
-        for constraint_obj in constraints.values():
-            kwarg_name = inverse_map.get(type(constraint_obj))
-            if kwarg_name:
-                 # Special handling for pattern if needed (regex vs pattern string)
-                 value = constraint_obj.regex if isinstance(constraint_obj, Pattern) else constraint_obj.value
-                 kwargs[kwarg_name] = value
+        for constraint in constraints.values():
+            if isinstance(constraint, GreaterThan):
+                kwargs['gt'] = constraint.value
+            elif isinstance(constraint, LessThan):
+                kwargs['lt'] = constraint.value
+            elif isinstance(constraint, MinValue):
+                kwargs['ge'] = constraint.value
+            elif isinstance(constraint, MaxValue):
+                kwargs['le'] = constraint.value
+            elif isinstance(constraint, MinLength):
+                kwargs['min_length'] = constraint.value
+            elif isinstance(constraint, MaxLength):
+                kwargs['max_length'] = constraint.value
+            elif isinstance(constraint, Pattern):
+                kwargs['pattern'] = constraint.pattern
+            elif isinstance(constraint, MultipleOf):
+                kwargs['multiple_of'] = constraint.value
+            elif isinstance(constraint, OneOf):
+                kwargs['allowed_values'] = constraint.allowed_values
         return kwargs
-
-    # Helper similar to TypeMapper's - needed for schema reconstruction
-    def _create_model_from_schema(self, model_name: str, schema: Dict) -> Type[BaseModel]:
-         """Creates a Pydantic model from a JSON schema dictionary."""
-         # This logic would be adapted from TypeMapper._create_pydantic_model_from_schema
-         # It needs to parse schema['properties'], schema['required'] etc.
-         # And map JSON schema types/formats/constraints back to Pydantic types/Field kwargs
-         # Using self._canonical_to_pydantic_type and self._constraints_to_field_kwargs might help here
-         # For brevity, returning a dummy model here. Replace with full implementation.
-         print(f"Warning: _create_model_from_schema not fully implemented. Creating dummy model for {model_name}.")
-         fields_from_schema = {}
-         properties = schema.get('properties', {})
-         required = schema.get('required', [])
-         for name, prop_schema in properties.items():
-             # Basic type mapping example
-             json_type = prop_schema.get('type')
-             py_type: Type = Any
-             if json_type == 'integer': py_type = int
-             elif json_type == 'number': py_type = float
-             elif json_type == 'string': py_type = str
-             elif json_type == 'boolean': py_type = bool
-             # TODO: Handle formats, constraints, arrays, objects recursively
-             is_req = name in required
-             default = ... if is_req else prop_schema.get('default', None)
-             fields_from_schema[name] = (py_type, default)
-
-         if not fields_from_schema: # Create dummy if parse failed
-              return create_model(model_name, __config__=None, dummy_field=(Any, None))
-         else:
-              return create_model(model_name, **fields_from_schema)

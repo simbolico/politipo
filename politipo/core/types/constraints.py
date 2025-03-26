@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, Type, Union, Pattern as RegexPattern
+from typing import Any, Dict, Type, Union, Pattern as RegexPattern, List
 from decimal import Decimal, InvalidOperation
 import re
 from ..errors import ConstraintViolationError
@@ -318,6 +318,34 @@ class MultipleOf(Constraint):
         return cls(value=data["value"])
 
 
+@dataclass(frozen=True)
+class OneOf(Constraint):
+    """Constraint that ensures a value is one of a set of allowed values."""
+    allowed_values: List[Any]
+
+    def __post_init__(self):
+        if not isinstance(self.allowed_values, (list, tuple, set)):
+            raise TypeError(f"OneOf requires a sequence of allowed values, got {type(self.allowed_values)}")
+        if not self.allowed_values:
+            raise ValueError("OneOf requires at least one allowed value")
+
+    def validate(self, val: Any) -> bool:
+        if val not in self.allowed_values:
+            raise ConstraintViolationError(
+                f"Value {val} is not one of the allowed values: {self.allowed_values}"
+            )
+        return True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"type": "one_of", "allowed_values": list(self.allowed_values)}
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "OneOf":
+        if "allowed_values" not in data:
+            raise ValueError("OneOf requires 'allowed_values' parameter")
+        return cls(allowed_values=data["allowed_values"])
+
+
 # Registry for constraint deserialization
 _CONSTRAINT_REGISTRY: Dict[str, Type[Constraint]] = {
     "min_value": MinValue,
@@ -330,6 +358,7 @@ _CONSTRAINT_REGISTRY: Dict[str, Type[Constraint]] = {
     "less_than_or_equal": LessThanOrEqual,
     "pattern": Pattern,
     "multiple_of": MultipleOf,
+    "one_of": OneOf,
 }
 
 

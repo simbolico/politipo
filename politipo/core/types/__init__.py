@@ -12,6 +12,7 @@ from .constraints import (
     LessThanOrEqual,
     Pattern,
     MultipleOf,
+    OneOf,
     constraint_from_dict
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "LessThanOrEqual",
     "Pattern",
     "MultipleOf",
+    "OneOf",
     "constraint_from_dict"
 ] 
