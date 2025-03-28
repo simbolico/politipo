@@ -54,7 +54,36 @@ class SQLModelTypeSystem(TypeSystem):
 
     @lru_cache(maxsize=128)
     def to_canonical(self, type_obj: Type[SQLModel]) -> CanonicalType:
-        """Converts a SQLModel class to CanonicalType by combining Pydantic structure and SQL metadata."""
+        """
+        Converts a SQLModel class to CanonicalType by combining Pydantic structure and SQL metadata.
+
+        This function extracts metadata from these SQLModel attributes:
+            - `__tablename__`: The name of the database table.
+            - Model fields (using Pydantic's field inspection):
+                - Name: The field name.
+                - Type: Mapped to a canonical type using the Pydantic type system.
+                - `primary_key`:  If True, the field is a primary key.
+                - `foreign_key`:  A foreign key relationship.
+            - `__table_args__`: Extracts index definitions from the table arguments.
+            - Relationships (using `sqlalchemy.orm.relationship`):
+                - Target: The target SQLModel class.
+                - `uselist`:  Whether the relationship is one-to-many or one-to-one.
+                - `direction`: The direction of the relationship.
+                - `foreign_keys`: Foreign key columns involved in the relationship.
+
+        It supports mapping these types to canonical types (delegating to Pydantic):
+            - `int`, `str`, `float`, `bool`, `date`, `datetime`, `Decimal`, `list`, `dict`
+            - Other types are mapped to 'any'.
+
+        Args:
+            type_obj: The SQLModel class to convert.
+
+        Returns:
+            A CanonicalType representation of the SQLModel.
+
+        Raises:
+            ConversionError: If the object is not a SQLModel class, or if extraction fails.
+        """
         if not self.detect(type_obj):
             raise ConversionError(f"Object {type_obj} is not a SQLModel class.")
 
@@ -105,14 +134,23 @@ class SQLModelTypeSystem(TypeSystem):
         # Extract Relationships
         sql_meta_data['sql_relationships'] = {}
         try:
+            # Iterate through attributes and handle potential lazy loading
             for name, attr in type_obj.__dict__.items():
-                if hasattr(attr, 'prop') and hasattr(attr.prop, 'target'):
-                    sql_meta_data['sql_relationships'][name] = {
-                        'target': attr.prop.target.name,
-                        'uselist': attr.prop.uselist,
-                        'direction': str(attr.prop.direction),
-                        'foreign_keys': [str(fk) for fk in attr.prop.foreign_keys] if attr.prop.foreign_keys else []
-                    }
+                # Trigger attribute access and handle AttributeError if it is lazy-loaded.
+                try:
+                    # This line will attempt to access the attribute and may trigger lazy loading
+                    attr_value = getattr(type_obj, name)
+                    if hasattr(attr_value, 'prop') and hasattr(attr_value.prop, 'target'):
+                        sql_meta_data['sql_relationships'][name] = {
+                            'target': attr_value.prop.target.name,
+                            'uselist': attr_value.prop.uselist,
+                            'direction': str(attr_value.prop.direction),
+                            'foreign_keys': [str(fk) for fk in attr_value.prop.foreign_keys] if attr_value.prop.foreign_keys else []
+                        }
+                except AttributeError:
+                    # Handle lazy-loaded attributes
+                    print(f"Warning: Could not access attribute '{name}' on SQLModel '{type_obj.__name__}'. Assuming it is lazy-loaded.")
+                    continue
         except Exception:
             pass  # Ignore errors extracting relationships
 

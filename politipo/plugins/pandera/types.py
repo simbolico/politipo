@@ -182,62 +182,42 @@ class PanderaTypeSystem(TypeSystem):
 
         # Process each column
         for name, column in schema.columns.items():
-            # For each Column, create a SeriesSchema with its properties
-            if not hasattr(column, 'schema'):
-                # Create a temporary SeriesSchema from Column properties
-                try:
-                    # Only pass attributes that exist
-                    series_kwargs = {}
-                    if hasattr(column, 'dtype'):
-                        series_kwargs['dtype'] = column.dtype
-                    if hasattr(column, 'checks'):
-                        series_kwargs['checks'] = column.checks
-                    if hasattr(column, 'nullable'):
-                        series_kwargs['nullable'] = column.nullable
-                    if hasattr(column, 'coerce'):
-                        series_kwargs['coerce'] = column.coerce
-                    if hasattr(column, 'name'):
-                        series_kwargs['name'] = name
-                    
-                    series_schema = pa.SeriesSchema(**series_kwargs)
-                    # Convert series schema to canonical type
-                    column_canon = self._series_to_canonical(series_schema)
-                except Exception as e:
-                    print(f"Warning: Failed to create SeriesSchema for column '{name}': {e}")
-                    # Create a basic canonical type as fallback
-                    column_canon = CanonicalType(
-                        kind="primitive",
-                        name=self._map_dtype_to_canonical(str(column.dtype)),
-                        meta=TypeMeta(data={"pandas_dtype": str(column.dtype)})
-                    )
-            else:
-                # Use existing schema if available (unlikely with current Pandera versions)
-                column_canon = self._series_to_canonical(column.schema)
+            try:
+                # Convert each Column, creating a SeriesSchema or using existing schema
+                series_kwargs = {}
 
-            # Extract field constraints
-            field_constraints = {}
-            
-            # Basic constraints
-            if column.nullable is not None:
-                field_constraints["nullable"] = column.nullable
-            if column.unique is not None:
-                field_constraints["unique"] = column.unique
-            if hasattr(column, 'coerce') and column.coerce is not None:
-                field_constraints["coerce"] = column.coerce
-            if hasattr(column, 'regex') and column.regex is not None:
-                field_constraints["pattern"] = column.regex
+                # Only pass attributes that exist, defaulting to None
+                series_kwargs['dtype'] = getattr(column, 'dtype', None)
+                series_kwargs['checks'] = getattr(column, 'checks', None)
+                series_kwargs['nullable'] = getattr(column, 'nullable', None)
+                series_kwargs['coerce'] = getattr(column, 'coerce', None)
+                series_kwargs['name'] = name
 
-            # Validation checks
-            if column.checks:
-                for check in column.checks:
-                    constraint = self._pandera_check_to_constraint(check)
-                    if constraint:
-                        field_constraints.update(constraint.to_dict())
+                series_schema = pa.SeriesSchema(**{k: v for k, v in series_kwargs.items() if v is not None})
+                column_canon = self._series_to_canonical(series_schema)
 
-            # Add field entry
+            except Exception as e:
+                print(f"Warning: Failed to create SeriesSchema for column '{name}': {e}")
+                column_canon = CanonicalType(
+                    kind="primitive",
+                    name=self._map_dtype_to_canonical(str(getattr(column, 'dtype', "object"))),  # Handle missing dtype
+                    meta=TypeMeta(data={"pandas_dtype": str(getattr(column, 'dtype', "object"))})
+                )
+
+            # --- Consolidated Constraint Handling ---
+            field_constraints = {
+                "nullable": getattr(column, "nullable", None),
+                "unique": getattr(column, "unique", None),
+                "coerce": getattr(column, "coerce", None),
+                "pattern": getattr(column, "regex", None),  # Directly get regex if available
+                **self._extract_checks_as_constraints(getattr(column, "checks", None))
+            }
+            field_constraints = {k: v for k, v in field_constraints.items() if v is not None}  # Remove None values
+            # --- End Consolidated Constraint Handling ---
+
             fields[name] = {
                 "type": column_canon,
-                "required": not column.nullable if column.nullable is not None else True,
+                "required": not field_constraints.get("nullable", True),  # Default to required if no nullable
                 "constraints": field_constraints,
                 "description": getattr(column, "description", None)
             }
@@ -255,19 +235,11 @@ class PanderaTypeSystem(TypeSystem):
                 "dtypes": [str(idx.dtype) for idx in (schema.index if isinstance(schema.index, list) else [schema.index])]
             }
 
-        # Add DataFrame-level constraints
-        if schema.unique_column_names is not None:
-            meta_data["unique_column_names"] = schema.unique_column_names
-        if schema.coerce is not None:
-            meta_data["coerce"] = schema.coerce
-        if schema.strict is not None:
-            meta_data["strict"] = schema.strict
-        if schema.ordered is not None:
-            meta_data["ordered"] = schema.ordered
-
-        # Add custom metadata
-        if hasattr(schema, "metadata") and schema.metadata:
-            meta_data["custom_metadata"] = schema.metadata
+        # Add DataFrame-level constraints and metadata with safe defaults
+        for key in ["unique_column_names", "coerce", "strict", "ordered", "metadata"]:
+            value = getattr(schema, key, None)
+            if value is not None:
+                meta_data[key] = value
 
         return CanonicalType(
             kind="composite",
@@ -275,6 +247,16 @@ class PanderaTypeSystem(TypeSystem):
             params={"fields": fields},
             meta=TypeMeta(data=meta_data)
         )
+
+    def _extract_checks_as_constraints(self, checks: Optional[List[pa.Check]]) -> Dict[str, Any]:
+        """Helper to extract constraints from a list of Pandera checks."""
+        constraints = {}
+        if checks:
+            for check in checks:
+                constraint = self._pandera_check_to_constraint(check)
+                if constraint:
+                    constraints.update(constraint.to_dict())
+        return constraints
 
     def _get_canonical_cache_key(self, canonical: CanonicalType) -> str:
         """Create a hashable key for a CanonicalType object."""

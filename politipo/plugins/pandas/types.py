@@ -322,11 +322,17 @@ class PandasTypeSystem(TypeSystem):
             if item_type_canonical:
                 # Recursively get the dtype for the categories themselves
                 item_dtype = self._canonical_to_dtype(item_type_canonical)
-                # Create CategoricalDtype (dtype must be numpy, not extension usually)
-                if isinstance(item_dtype, pd.api.extensions.ExtensionDtype):
-                     # If inner type is nullable, use object for categories
-                     np_item_dtype = np.object_
+                
+                # Determine if the item type is a Pandas ExtensionDtype
+                is_extension_dtype = isinstance(item_dtype, pd.api.extensions.ExtensionDtype)
+
+                # Select np_item_dtype based on item_dtype and use_nullable_dtypes:
+                if is_extension_dtype and use_nullable_dtypes:
+                    # If the inner type is a nullable ExtensionDtype AND we're using nullable dtypes generally,
+                    # use object to hold nullable strings/ints/etc as categories (common workaround)
+                    np_item_dtype = np.object_  # Force 'object' to handle categories. Object dtype can accommodate missing values that nullable ExtensionArrays generate.
                 else:
+                    # Otherwise, use item_dtype (might still be np.int64, np.float64, etc.)
                     np_item_dtype = item_dtype
 
                 try:
