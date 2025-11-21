@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "politipo"
-version = "0.1.5"
-description = "A library for seamless type conversions between Python data structures and models."
+version = "0.2.0"
+description = "PolyType: Pydantic → Arrow → DuckDB/Polars with vectorized validation (Pandera)."
 authors = [{ name = "Kevin Saltarelli", email = "kevinqz@gmail.com" }]
 requires-python = ">=3.13"
 readme = "README.md"
@@ -47,6 +47,7 @@ py-modules = ["politipo"]
 
 [tool.uv]
 # No custom fields; reserved for future uv settings.
+publish = { allow-dirty = false }
 
 [tool.ruff]
 line-length = 100
@@ -63,10 +64,11 @@ select = ["E", "F", "B", "I", "UP"]
 [tool.black]
 line-length = 100
 target-version = ["py313"]
+extend-exclude = "(legacy|backups|\\.specstory)/"
 
 [tool.pytest.ini_options]
 testpaths = ["src"]
-addopts = "-ra --strict-markers --maxfail=1 --cov=src --cov-report=term-missing --cov-fail-under=90"
+addopts = "-ra --strict-markers --maxfail=1 --cov=src --cov-report=term-missing --cov-fail-under=95"
 filterwarnings = [
     "ignore:the physical Categorical ordering is deprecated:DeprecationWarning",
 ]
@@ -81,4 +83,6 @@ skip_empty = true
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == \"__main__\":",
+    # Exclude abstract method ellipsis definitions
+    '^\\s*def\\s+\\w+\\(.*\\)\\s*->.*:\\s*\\.\\.\\.$',
 ]

@@ -1,39 +1,37 @@
-# politipo
+# politipo — PolyType Data Fabric
 
 [![CI](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/badge/coverage-92%25-brightgreen)
+![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Coverage](https://img.shields.io/badge/coverage-95%25%2B-brightgreen)
 
-Welcome to the official documentation for the `politipo` library! This guide provides a comprehensive overview of the library's functionality, usage, and best practices. Whether you're a beginner looking to get started or an advanced user seeking detailed API references, this documentation has you covered.
+PolyType: Pydantic → Arrow → DuckDB/Polars with vectorized validation (Pandera). Define your schema once with Pydantic v2, then move and validate data across modern analytics stacks with zero-copy where possible.
 
-Current version: 0.1.3 - Featuring automatic library detection for simplified type mapping.
+Highlights
+- Define once: Pydantic v2 + Annotated metadata
+- Transport fast: uuid as fixed-size binary; enums as dictionary; vectors as FixedSizeList
+- Validate vectorized: Pandera (Polars backend, robust Pandas fallback)
+- Analyze anywhere: DuckDB + Polars; Kùzu DDL generation
+- Lean installs: uv-only workflow; extras loaded on demand
 
----
+Install
 
-## Introduction
+Use uv (recommended):
 
-`politipo` is a versatile Python library designed to simplify type conversions between various data structures and models. It supports seamless conversions between built-in types (e.g., `dict`), Pydantic models, SQLModel instances, SQLAlchemy models, and dataframes from Pandas and Polars. The library's primary goal is to streamline data transformations, making it easier for developers to work with diverse data formats in their applications.
-
-The library consists of two main components:
-- **TypeConverter**: Handles data conversions between different types (e.g., converting a dictionary to a Pydantic model)
-- **TypeMapper**: Maps type definitions between different libraries using a canonical type system (e.g., mapping Python's `int` to SQLAlchemy's `Integer`)
-
----
-
-## Installation
-
-To install `politipo`, use the following command in your terminal or command prompt:
-
-```bash
-pip install politipo
+```
+uv pip install politipo
 ```
 
-### Requirements
-- Python 3.13+ for local dev (CI also tests 3.14)
-- Additional dependencies (e.g., `pydantic`, `sqlmodel`, `sqlalchemy`, `pandas`, `polars`) may be required depending on the conversions you perform. These will be dynamically imported as needed.
+Optional extras:
+- Arrow/Parquet: `uv pip install 'politipo[arrow]'`
+- Polars: `uv pip install 'politipo[polars]'`
+- DuckDB: `uv pip install 'politipo[duckdb]'`
+- Validation (Pandera): `uv pip install 'politipo[validation]'`
+- Pandas fallback: `uv pip install 'politipo[pandas]'`
+- SQLAlchemy types: `uv pip install 'politipo[sqlalchemy]'`
+- Everything: `uv pip install 'politipo[all]'`
 
----
-
-## Quick Start (new src API)
+Quick Start
 
 ```python
 from typing import Annotated
@@ -76,37 +74,14 @@ df = pt.to_polars(rows, validate=True)
 print(df)
 ```
 
-## Why This Is SotA
+Why SotA
 
-- Define once with Pydantic v2 + Annotated metadata.
-- Zero-copy transport via Arrow (UUID as 16-byte binary; vectors as FixedSizeList).
-- Vectorized data quality via Pandera (Polars backend, robust Pandas fallback).
-- Query anywhere: DuckDB/Polars, with Kùzu DDL mapping support.
-- Lean installs: base is tiny; extras installed only when needed via uv.
+- Single source of truth: Pydantic + Annotated drives Arrow/DuckDB/Polars/Pandera
+- Memory-aware storage: uuid binary(16), enums dictionary encoding, vectors as FixedSizeList
+- Graceful DX: missing extras raise actionable “uv pip install '.[extra]'” hints
+- UV-native: lock, sync, run, build, publish
 
-## Legacy vs New (Comparison)
-
-- Scope: legacy aimed to be universal (conversion engine + canonical types); new is focused on a fast, Arrow-first model → table pipeline.
-- Dependencies: legacy pulled many ecosystems by default; new uses extras to stay minimal and enable features only when installed.
-- Typing: legacy used a canonical type system; new uses Pydantic v2 + Annotated metadata to drive storage/DDL/validation directly.
-- Performance: new stores UUID as 16-byte binary, enums as dictionary, vectors as FixedSizeList, and uses Arrow→DuckDB ingestion.
-- Validation: new integrates Pandera with Polars, with a robust Pandas fallback and broader constraint mapping.
-- Dev tooling: uv-only, ruff/black/ty, coverage gates, matrix CI; src-only tests and packaging.
-
-See legacy/README_legacy.md for the archived documentation of the previous approach.
-
-## Install Matrix (uv)
-
-- Base: `uv pip install .` (pydantic only)
-- Arrow/Parquet: `uv pip install '.[arrow]'`
-- Polars: `uv pip install '.[polars]'`
-- DuckDB: `uv pip install '.[duckdb]'`
-- Validation (Pandera): `uv pip install '.[validation]'`
-- Pandas fallback for validation: `uv pip install '.[pandas]'`
-- SQLAlchemy types (optional): `uv pip install '.[sqlalchemy]'`
-- All extras: `uv pip install '.[all]'`
-
-## API Overview
+API Overview
 
 - Precision: `Annotated[Decimal, pt.Precision(p, s)]` → Arrow decimal128, DuckDB DECIMAL(p,s)
 - Vector[N]: `pt.Vector[N]` → Arrow FixedSizeList(float32, N); DuckDB FLOAT[N]
@@ -122,14 +97,14 @@ See legacy/README_legacy.md for the archived documentation of the previous appro
 - Pipeline (fluent):
   - `pt.from_models(rows).to_arrow().to_duckdb(con, 'tbl').to_polars(validate=True)`
 
-## Recipes
+Recipes
 
 - Financial decimals: `Precision(38, 18)` for high-precision columns; DuckDB DECIMAL(38,18).
 - Embeddings: `Vector[1536]` stored as FixedSizeList(float32, 1536); Arrow-friendly for RAG.
 - Enums as dictionary: memory-efficient encoded storage via Arrow dictionary type.
 - Kùzu DDL: `generate_ddl('kuzu', 'Node')` produces STRUCT-based Node table schema with PK.
 
-## Missing-Extras UX
+Missing-Extras UX
 
 If a dependency is missing, you’ll see a helpful error:
 
@@ -138,7 +113,7 @@ Missing optional dependency 'pyarrow'.
 Install with: uv pip install '.[arrow]'
 ```
 
-## Benchmarks (excerpt)
+Benchmarks (excerpt)
 
 - UUID binary vs string UUIDs: smaller footprint, faster scans.
 - Enums as dictionary vs strings: reduced RAM.
@@ -146,7 +121,7 @@ Install with: uv pip install '.[arrow]'
 
 Run local benchmarks with uv, then compare using your data shape. (Optional scripts incoming.)
 
-## Onboarding: Step-by-Step
+Onboarding: Step-by-Step
 
 - Create a venv and sync dev tools:
   - `uv python pin 3.13 && uv sync --group dev`
@@ -160,64 +135,18 @@ Run local benchmarks with uv, then compare using your data shape. (Optional scri
 - Use `pt.pipeline(rows)` to to_arrow().to_duckdb().to_polars(validate=True).
 - Missing dependency? Error messages tell exactly which extra to install.
 
-## Development (uv-only)
+Development (uv-only)
 
 - Lint/format/type: `make lint`, `make fmt-check`, `make type`
 - Tests: `make test` (src/), coverage: `make cov`
 - Pre-commit: `make pre-commit`
 
----
+Releases
 
-## Features
-
-`politipo` offers a rich set of features to handle type conversions effectively:
-
-- **Bidirectional Conversions**: Convert between supported types in both directions.
-- **Type Safety**: Leverages Python type hints for runtime validation.
-- **Collection Handling**: Supports conversions for single items and collections (e.g., lists, dataframes).
-- **Dynamic Imports**: Only requires libraries necessary for the specific conversion, reducing dependency overhead.
-- **Error Handling**: Provides clear error messages for unsupported types or missing dependencies.
-- **Extensibility**: Allows advanced users to customize conversion logic.
-- **Type Mapping**: Map type definitions between different libraries through a canonical type system.
-- **Minimal Dependencies**: Each component only requires the libraries necessary for the specific operation.
-
----
-
-## Usage
-
-This section provides in-depth explanations and examples of how to use `politipo` for various conversions and type mappings.
-
-### TypeConverter Usage
-
-#### Basic Conversions
-To perform a conversion, create a `TypeConverter` instance with the source (`from_type`) and target (`to_type`) types, then call the `convert` method:
-
-```python
-converter = TypeConverter(from_type=SourceType, to_type=TargetType)
-result = converter.convert(data)
-```
-
-#### Converting to `dict`
-Convert various types (e.g., Pydantic models, SQLModel instances) to a dictionary:
-
-```python
-converter = TypeConverter(from_type=User, to_type=dict)
-user_dict = converter.convert(user_instance)  # user_instance is a User object
-```
-
-#### Converting to Pydantic Models
-Convert from `dict`, other Pydantic models, SQLModel instances, SQLAlchemy models, or dataframes to a Pydantic model:
-
-```python
-converter = TypeConverter(from_type=dict, to_type=User)
-user = converter.convert({"id": 1, "name": "Alice"})
-```
-
-#### Converting to SQLModel Instances
-Convert data to SQLModel instances (requires the `sqlmodel` library):
-
-```python
-converter = TypeConverter(from_type=dict, to_type=UserSQLModel)
+- Semantic versioning
+- Build with uv: `make build`
+- Publish with uv (requires `UV_PUBLISH_TOKEN`): `make publish`
+- Release flow: `make release` then push tags: `git push --follow-tags` (publishing can be automated in CI)
 user_sqlmodel = converter.convert({"id": 1, "name": "Alice"})
 ```
 
