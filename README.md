@@ -1,4 +1,7 @@
-# `politipo` Library Documentation
+# politipo
+
+[![CI](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml)
+![Coverage](https://img.shields.io/badge/coverage-92%25-brightgreen)
 
 Welcome to the official documentation for the `politipo` library! This guide provides a comprehensive overview of the library's functionality, usage, and best practices. Whether you're a beginner looking to get started or an advanced user seeking detailed API references, this documentation has you covered.
 
@@ -30,51 +33,48 @@ pip install politipo
 
 ---
 
-## Quick Start
-
-### TypeConverter Example
-
-Here's a simple example to get you up and running with `TypeConverter`:
+## Quick Start (new src API)
 
 ```python
-from politipo import TypeConverter
-from pydantic import BaseModel
+from typing import Annotated
+import uuid, datetime, decimal, enum
+from pydantic import BaseModel, Field
+import politipo as pt
 
-# Define a Pydantic model
-class User(BaseModel):
-    id: int
-    name: str
+class UserType(enum.Enum):
+    ADMIN = "admin"
+    USER = "user"
 
-# Create a converter and perform a conversion
-converter = TypeConverter(from_type=dict, to_type=User)
-user = converter.convert({"id": 1, "name": "Alice"})
-print(user)  # Output: User(id=1, name='Alice')
+class Event(BaseModel):
+    id: Annotated[uuid.UUID, pt.FieldInfo(primary_key=True)]  # PK
+    cost: Annotated[decimal.Decimal, pt.Precision(18, 4), Field(gt=0)]  # constraints
+    embedding: pt.Vector[4] | None  # vector type
+    user_type: UserType  # enum
+    timestamp: datetime.datetime
+
+# Generate DDL
+print(pt.generate_ddl(Event, "duckdb", "events"))
+print(pt.generate_ddl(Event, "kuzu", "Events"))
+
+# Create data
+rows = [
+    Event(
+        id=uuid.uuid4(),
+        cost=decimal.Decimal("10.5000"),
+        embedding=[0.1, 0.2, 0.3, 0.4],
+        user_type=UserType.ADMIN,
+        timestamp=datetime.datetime.now(),
+    )
+]
+
+# Convert to Arrow (install extra: 'arrow')
+tbl = pt.to_arrow(rows)  # pyarrow.Table
+print(tbl.schema)
+
+# Convert to Polars with validation (install extras: 'polars', 'validation', 'pandas')
+df = pt.to_polars(rows, validate=True)
+print(df)
 ```
-
-This example converts a dictionary to a Pydantic model, demonstrating the library's core functionality.
-
-### TypeMapper Example
-
-Here's a simple example showing how to use `TypeMapper` to map types between different libraries:
-
-```python
-from politipo import TypeMapper
-import polars as pl
-from sqlalchemy import Integer
-
-# Create a mapper
-mapper = TypeMapper()
-
-# Map SQLAlchemy Integer to Polars Int64
-polars_type = mapper.map_type(Integer, to_library='polars')  # Auto-detects SQLAlchemy
-print(polars_type)  # Output: Int64
-
-# Map Python int to Pandas Int64Dtype
-pandas_type = mapper.map_type(int, to_library='pandas')  # Auto-detects Python
-print(pandas_type)  # Output: Int64Dtype()
-```
-
-This example shows how to map type definitions between SQLAlchemy, Polars, and Pandas libraries.
 
 ---
 
@@ -565,6 +565,8 @@ Or in a synced dev environment:
 ```
 uv sync --group dev
 ```
+
+Note: This project uses uv exclusively; pip/poetry are not used in CI or docs.
 
 ### Pre-commit
 
