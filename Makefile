@@ -42,6 +42,10 @@ type:
 test:
 	PYTHONPATH=$(PYTHONPATH) $(UV) run pytest -q $(PYTHONPATH)
 
+.PHONY: cov
+cov:
+	PYTHONPATH=$(PYTHONPATH) $(UV) run pytest -q $(PYTHONPATH) --cov=src --cov-report=term-missing
+
 pre-commit:
 	$(UV) run pre-commit install
 	$(UV) run pre-commit run --all-files

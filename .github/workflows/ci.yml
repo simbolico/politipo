@@ -41,7 +41,12 @@ jobs:
       - name: Type check (ty)
         run: uv run ty
 
-      - name: Tests (pytest)
+      - name: Tests + Coverage (pytest)
         env:
           PYTHONPATH: src
         run: uv run pytest -q
+
+      - name: Coverage summary
+        if: always()
+        run: |
+          echo "\nCoverage summary:" && ls -la || true
