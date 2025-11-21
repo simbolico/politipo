@@ -92,6 +92,52 @@ def test_generate_ddl_with_sqlalchemy_if_available():
     assert "CREATE TABLE" in ddl and "ux_table" in ddl
 
 
+def test_generate_ddl_sqlalchemy_path_monkeypatched(monkeypatch):
+    # Force SQLAlchemy path with stubs to increase coverage
+    class TypeStub:
+        def __call__(self, *a, **k):
+            return self
+
+        def compile(self, dialect=None):
+            # return a simple portable name
+            return "VARCHAR"
+
+    class SAStub:
+        String = TypeStub
+        BigInteger = TypeStub
+        Float = TypeStub
+        Boolean = TypeStub
+        Uuid = TypeStub
+        Numeric = staticmethod(lambda p, s: TypeStub())
+        DateTime = staticmethod(lambda timezone=True: TypeStub())
+        ARRAY = staticmethod(lambda t: TypeStub())
+        JSON = TypeStub
+
+    class DialectStub:
+        @staticmethod
+        def dialect():
+            return object()
+
+    class DialectsStub:
+        postgresql = DialectStub
+        sqlite = DialectStub
+        mysql = DialectStub
+
+    import sys
+
+    monkeypatch.setattr(pt, "SQL_AVAILABLE", True)
+    monkeypatch.setattr(pt, "sa", SAStub)
+    sys.modules["sqlalchemy.dialects"] = DialectsStub
+
+    ddl = pt.PolyTransporter(UXModel).generate_ddl("sql+postgresql", "ux_table")
+    assert "CREATE TABLE" in ddl
+
+
+def test_invalid_table_identifier_raises():
+    with pytest.raises(ValueError):
+        pt.PolyTransporter(UXModel).generate_ddl("duckdb", "bad-name")
+
+
 def test_require_messages():
     # Simulate missing extras and confirm helpful messages
     with pytest.raises(ImportError) as e:
@@ -110,3 +156,14 @@ def test_require_messages():
     # We don't assert the exact text, but ensure it hints uv + extra
     msg = str(e.value)
     assert "uv pip install" in msg or msg
+
+
+@pytest.mark.skipif(not pt.ARROW_AVAILABLE, reason="arrow missing")
+def test_invalid_vector_length_raises():
+    class VModel(BaseModel):
+        emb: pt.Vector[4] | None
+
+    # Bypass validation to inject bad length
+    bad = VModel.model_construct(emb=[0.1, 0.2, 0.3])
+    with pytest.raises(ValueError):
+        pt.PolyTransporter(VModel).to_arrow([bad])

@@ -341,6 +341,15 @@ class VectorSpec(TypeSpec):
     def arrow(self):
         return pa.list_(pa.float32(), self.dim) if ARROW_AVAILABLE else None
 
+    def serialize(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if not isinstance(value, list | tuple):
+            raise TypeError("Vector value must be a list or tuple of floats")
+        if len(value) != self.dim:
+            raise ValueError(f"Vector length {len(value)} does not match expected dim {self.dim}")
+        return value
+
 
 class StructSpec(TypeSpec):
     def __init__(self, fields: dict[str, TypeSpec], **kwargs):
@@ -646,6 +655,17 @@ class PolyTransporter:
 
     def generate_ddl(self, dialect: Literal["duckdb", "kuzu", "sql"] | str, table_name: str) -> str:
         """Generates CREATE TABLE statements for infrastructure."""
+
+        def _sanitize_ident(name: str) -> str:
+            import re
+
+            if not isinstance(name, str):
+                raise ValueError("Identifier must be a string")
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+                raise ValueError(f"Unsafe identifier: {name!r}")
+            return name
+
+        safe_table = _sanitize_ident(table_name)
         # Optional: SQLAlchemy-backed compilation when available via
         # dialect strings like 'sql+postgresql'
         if isinstance(dialect, str) and dialect.startswith("sql+") and SQL_AVAILABLE:
@@ -687,7 +707,7 @@ class PolyTransporter:
                 f"{k} {compile_type(v)}" + (" PRIMARY KEY" if v.is_pk else "")
                 for k, v in self.spec.fields.items()
             )
-            return f"CREATE TABLE IF NOT EXISTS {table_name} ({cols});"
+            return f"CREATE TABLE IF NOT EXISTS {safe_table} ({cols});"
         elif isinstance(dialect, str) and dialect.startswith("sql+") and not SQL_AVAILABLE:
             # Fallback to generic SQL if SQLAlchemy is not available
             dialect = "sql"
@@ -696,12 +716,12 @@ class PolyTransporter:
                 f"{k} {v.duckdb}" + (" PRIMARY KEY" if v.is_pk else "")
                 for k, v in self.spec.fields.items()
             )
-            return f"CREATE TABLE IF NOT EXISTS {table_name} ({cols});"
+            return f"CREATE TABLE IF NOT EXISTS {safe_table} ({cols});"
 
         elif dialect == "kuzu":
             pk_col = next((k for k, v in self.spec.fields.items() if v.is_pk), "id")
             cols = ", ".join(f"{k} {v.kuzu}" for k, v in self.spec.fields.items())
-            return f"CREATE NODE TABLE {table_name} ({cols}, PRIMARY KEY ({pk_col}));"
+            return f"CREATE NODE TABLE {safe_table} ({cols}, PRIMARY KEY ({pk_col}));"
 
         elif dialect == "sql":
             # Generic SQL: prefer simple portable type names
@@ -710,7 +730,7 @@ class PolyTransporter:
                 return t if isinstance(t, str) else ts.duckdb
 
             cols = ", ".join(f"{k} {type_name(v)}" for k, v in self.spec.fields.items())
-            return f"CREATE TABLE {table_name} ({cols});"
+            return f"CREATE TABLE {safe_table} ({cols});"
 
         return ""
 
@@ -731,7 +751,7 @@ class PolyTransporter:
         serializers = {}
         for k, v in self.spec.fields.items():
             # We only need custom serialization for complex types
-            if isinstance(v, UUIDSpec | EnumSpec | StructSpec | ListSpec):
+            if isinstance(v, UUIDSpec | EnumSpec | StructSpec | ListSpec | VectorSpec):
                 serializers[k] = v.serialize
             else:
                 serializers[k] = None
