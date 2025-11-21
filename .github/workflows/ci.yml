@@ -32,6 +32,9 @@ jobs:
       - name: Sync dependencies (dev)
         run: uv sync --group dev
 
+      - name: Install extras for tests
+        run: uv pip install '.[all]'
+
       - name: Lint (ruff)
         run: uv run ruff check .
 

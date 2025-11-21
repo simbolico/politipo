@@ -46,6 +46,15 @@ test:
 cov:
 	PYTHONPATH=$(PYTHONPATH) $(UV) run pytest -q $(PYTHONPATH) --cov=src --cov-report=term-missing
 
+.PHONY: extras-all
+extras-all:
+	$(UV) pip install '.[all]'
+
+.PHONY: env-clean
+env-clean:
+	rm -rf .venv
+	$(UV) sync --group dev
+
 pre-commit:
 	$(UV) run pre-commit install
 	$(UV) run pre-commit run --all-files

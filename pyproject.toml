@@ -39,9 +39,6 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "hypothesis>=6.95.0",
-    "pyarrow>=22.0.0",
-    "polars>=1.35.2",
-    "duckdb>=1.4.2",
 ]
 
 [tool.setuptools]
@@ -69,7 +66,10 @@ target-version = ["py313"]
 
 [tool.pytest.ini_options]
 testpaths = ["src"]
-addopts = "-ra --strict-markers --disable-warnings --maxfail=1 --cov=src --cov-report=term-missing --cov-fail-under=85"
+addopts = "-ra --strict-markers --maxfail=1 --cov=src --cov-report=term-missing --cov-fail-under=90"
+filterwarnings = [
+    "ignore:the physical Categorical ordering is deprecated:DeprecationWarning",
+]
 
 [tool.coverage.run]
 branch = true
