@@ -1,11 +1,6 @@
-# politipo
-
-[![CI](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/badge/coverage-92%25-brightgreen)
+# `politipo` Library Documentation
 
 Welcome to the official documentation for the `politipo` library! This guide provides a comprehensive overview of the library's functionality, usage, and best practices. Whether you're a beginner looking to get started or an advanced user seeking detailed API references, this documentation has you covered.
-
-Current version: 0.1.3 - Featuring automatic library detection for simplified type mapping.
 
 ---
 
@@ -28,143 +23,56 @@ pip install politipo
 ```
 
 ### Requirements
-- Python 3.13+ for local dev (CI also tests 3.14)
+- Python 3.11 or higher
 - Additional dependencies (e.g., `pydantic`, `sqlmodel`, `sqlalchemy`, `pandas`, `polars`) may be required depending on the conversions you perform. These will be dynamically imported as needed.
 
 ---
 
-## Quick Start (new src API)
+## Quick Start
+
+### TypeConverter Example
+
+Here's a simple example to get you up and running with `TypeConverter`:
 
 ```python
-from typing import Annotated
-import uuid, datetime, decimal, enum
-from pydantic import BaseModel, Field
-import politipo as pt
+from politipo import TypeConverter
+from pydantic import BaseModel
 
-class UserType(enum.Enum):
-    ADMIN = "admin"
-    USER = "user"
+# Define a Pydantic model
+class User(BaseModel):
+    id: int
+    name: str
 
-class Event(BaseModel):
-    id: Annotated[uuid.UUID, pt.FieldInfo(primary_key=True)]  # PK
-    cost: Annotated[decimal.Decimal, pt.Precision(18, 4), Field(gt=0)]  # constraints
-    embedding: pt.Vector[4] | None  # vector type
-    user_type: UserType  # enum
-    timestamp: datetime.datetime
-
-# Generate DDL
-print(pt.generate_ddl(Event, "duckdb", "events"))
-print(pt.generate_ddl(Event, "kuzu", "Events"))
-
-# Create data
-rows = [
-    Event(
-        id=uuid.uuid4(),
-        cost=decimal.Decimal("10.5000"),
-        embedding=[0.1, 0.2, 0.3, 0.4],
-        user_type=UserType.ADMIN,
-        timestamp=datetime.datetime.now(),
-    )
-]
-
-# Convert to Arrow (install extra: 'arrow')
-tbl = pt.to_arrow(rows)  # pyarrow.Table
-print(tbl.schema)
-
-# Convert to Polars with validation (install extras: 'polars', 'validation', 'pandas')
-df = pt.to_polars(rows, validate=True)
-print(df)
+# Create a converter and perform a conversion
+converter = TypeConverter(from_type=dict, to_type=User)
+user = converter.convert({"id": 1, "name": "Alice"})
+print(user)  # Output: User(id=1, name='Alice')
 ```
 
-## Why This Is SotA
+This example converts a dictionary to a Pydantic model, demonstrating the library's core functionality.
 
-- Define once with Pydantic v2 + Annotated metadata.
-- Zero-copy transport via Arrow (UUID as 16-byte binary; vectors as FixedSizeList).
-- Vectorized data quality via Pandera (Polars backend, robust Pandas fallback).
-- Query anywhere: DuckDB/Polars, with Kùzu DDL mapping support.
-- Lean installs: base is tiny; extras installed only when needed via uv.
+### TypeMapper Example
 
-## Legacy vs New (Comparison)
+Here's a simple example showing how to use `TypeMapper` to map types between different libraries:
 
-- Scope: legacy aimed to be universal (conversion engine + canonical types); new is focused on a fast, Arrow-first model → table pipeline.
-- Dependencies: legacy pulled many ecosystems by default; new uses extras to stay minimal and enable features only when installed.
-- Typing: legacy used a canonical type system; new uses Pydantic v2 + Annotated metadata to drive storage/DDL/validation directly.
-- Performance: new stores UUID as 16-byte binary, enums as dictionary, vectors as FixedSizeList, and uses Arrow→DuckDB ingestion.
-- Validation: new integrates Pandera with Polars, with a robust Pandas fallback and broader constraint mapping.
-- Dev tooling: uv-only, ruff/black/ty, coverage gates, matrix CI; src-only tests and packaging.
+```python
+from politipo import TypeMapper
+import polars as pl
+from sqlalchemy import Integer
 
-See legacy/README_legacy.md for the archived documentation of the previous approach.
+# Create a mapper
+mapper = TypeMapper()
 
-## Install Matrix (uv)
+# Map SQLAlchemy Integer to Polars Int64
+polars_type = mapper.map_type(Integer, 'sqlalchemy', 'polars')
+print(polars_type)  # Output: Int64
 
-- Base: `uv pip install .` (pydantic only)
-- Arrow/Parquet: `uv pip install '.[arrow]'`
-- Polars: `uv pip install '.[polars]'`
-- DuckDB: `uv pip install '.[duckdb]'`
-- Validation (Pandera): `uv pip install '.[validation]'`
-- Pandas fallback for validation: `uv pip install '.[pandas]'`
-- SQLAlchemy types (optional): `uv pip install '.[sqlalchemy]'`
-- All extras: `uv pip install '.[all]'`
-
-## API Overview
-
-- Precision: `Annotated[Decimal, pt.Precision(p, s)]` → Arrow decimal128, DuckDB DECIMAL(p,s)
-- Vector[N]: `pt.Vector[N]` → Arrow FixedSizeList(float32, N); DuckDB FLOAT[N]
-- Resolver → Specs: Maps model fields to TypeSpecs (String/Int/Float/Bool/UUID/Decimal/List/Struct/Enum)
-- PolyTransporter:
-  - `to_arrow(models)` → `pyarrow.Table`
-  - `to_polars(models, validate=True)` → `polars.DataFrame`
-  - `ingest_duckdb(con, table, models)` → insert via Arrow
-  - `generate_ddl(dialect, table)` → DuckDB/Kùzu/portable SQL
-- QualityGate:
-  - `generate_schema(model, backend='polars'|'pandas')` → Pandera schema
-  - Extracts gt/ge/lt/le/pattern, min_length/max_length, multiple_of
-- Pipeline (fluent):
-  - `pt.from_models(rows).to_arrow().to_duckdb(con, 'tbl').to_polars(validate=True)`
-
-## Recipes
-
-- Financial decimals: `Precision(38, 18)` for high-precision columns; DuckDB DECIMAL(38,18).
-- Embeddings: `Vector[1536]` stored as FixedSizeList(float32, 1536); Arrow-friendly for RAG.
-- Enums as dictionary: memory-efficient encoded storage via Arrow dictionary type.
-- Kùzu DDL: `generate_ddl('kuzu', 'Node')` produces STRUCT-based Node table schema with PK.
-
-## Missing-Extras UX
-
-If a dependency is missing, you’ll see a helpful error:
-
-```
-Missing optional dependency 'pyarrow'.
-Install with: uv pip install '.[arrow]'
+# Map Python int to Pandas Int64Dtype
+pandas_type = mapper.map_type(int, 'python', 'pandas')
+print(pandas_type)  # Output: Int64Dtype()
 ```
 
-## Benchmarks (excerpt)
-
-- UUID binary vs string UUIDs: smaller footprint, faster scans.
-- Enums as dictionary vs strings: reduced RAM.
-- Arrow → DuckDB ingest: high throughput via Arrow bridge.
-
-Run local benchmarks with uv, then compare using your data shape. (Optional scripts incoming.)
-
-## Onboarding: Step-by-Step
-
-- Create a venv and sync dev tools:
-  - `uv python pin 3.13 && uv sync --group dev`
-- Install extras you need:
-  - Arrow: `uv pip install '.[arrow]'`
-  - Polars: `uv pip install '.[polars]'`
-  - DuckDB: `uv pip install '.[duckdb]'`
-  - Validation: `uv pip install '.[validation]'` (+ `.[pandas]` for fallback)
-- Define a Pydantic model with Annotated metadata (Precision, Field constraints, Vector[N]).
-- Generate DDL and create a table (DuckDB/Kùzu).
-- Use `pt.pipeline(rows)` to to_arrow().to_duckdb().to_polars(validate=True).
-- Missing dependency? Error messages tell exactly which extra to install.
-
-## Development (uv-only)
-
-- Lint/format/type: `make lint`, `make fmt-check`, `make type`
-- Tests: `make test` (src/), coverage: `make cov`
-- Pre-commit: `make pre-commit`
+This example shows how to map type definitions between SQLAlchemy, Polars, and Pandas libraries.
 
 ---
 
@@ -253,19 +161,15 @@ To map a type from one library to another, create a `TypeMapper` instance and us
 
 ```python
 mapper = TypeMapper()
-# Auto-detect the source library (if possible)
-target_type = mapper.map_type(source_type, to_library='target_library')
-
-# Or explicitly specify the source library
-target_type = mapper.map_type(source_type, to_library='target_library', from_library='source_library')
+target_type = mapper.map_type(source_type, from_library, to_library)
 ```
 
 #### Mapping Python Types
 Map between Python built-in types and other libraries:
 
 ```python
-# Map Python int to SQLAlchemy Integer (auto-detection)
-sqlalchemy_type = mapper.map_type(int, to_library='sqlalchemy')
+# Map Python int to SQLAlchemy Integer
+sqlalchemy_type = mapper.map_type(int, 'python', 'sqlalchemy')
 # Import needed only when using the result
 from sqlalchemy import Integer
 assert sqlalchemy_type is Integer
@@ -276,8 +180,8 @@ Map SQLAlchemy types to other libraries:
 
 ```python
 from sqlalchemy import String
-# Map SQLAlchemy String to Polars Utf8 (auto-detection)
-polars_type = mapper.map_type(String, to_library='polars')
+# Map SQLAlchemy String to Polars Utf8
+polars_type = mapper.map_type(String, 'sqlalchemy', 'polars')
 # Import needed only when using the result
 import polars as pl
 assert polars_type is pl.Utf8
@@ -288,8 +192,8 @@ Map Pandas types to other libraries:
 
 ```python
 import pandas as pd
-# Map Pandas StringDtype to Python str (auto-detection)
-python_type = mapper.map_type(pd.StringDtype(), to_library='python')
+# Map Pandas StringDtype to Python str
+python_type = mapper.map_type(pd.StringDtype(), 'pandas', 'python')
 assert python_type is str
 ```
 
@@ -298,8 +202,8 @@ Map Polars types to other libraries:
 
 ```python
 import polars as pl
-# Map Polars Boolean to SQLAlchemy Boolean (auto-detection)
-sqlalchemy_type = mapper.map_type(pl.Boolean, to_library='sqlalchemy')
+# Map Polars Boolean to SQLAlchemy Boolean
+sqlalchemy_type = mapper.map_type(pl.Boolean, 'polars', 'sqlalchemy')
 # Import needed only when using the result
 from sqlalchemy import Boolean
 assert sqlalchemy_type is Boolean
@@ -315,35 +219,6 @@ canonical = mapper.get_canonical_type(int, 'python')  # Returns 'integer'
 # Get library type from canonical
 python_type = mapper.get_library_type('integer', 'python')  # Returns int
 ```
-
-#### Automatic Library Detection
-The `TypeMapper` class now supports automatic detection of the source library for type objects. This makes it easier to map types between libraries without needing to explicitly specify the source library.
-
-### Using Library Auto-detection
-
-```python
-from politipo import TypeMapper
-from sqlalchemy import Integer
-import polars as pl
-
-mapper = TypeMapper()
-
-# Auto-detect sqlalchemy as the source library
-pl_type = mapper.map_type(Integer, to_library='polars')
-assert pl_type is pl.Int64
-
-# Auto-detect python as the source library
-sqlalchemy_type = mapper.map_type(int, to_library='sqlalchemy')
-assert sqlalchemy_type is Integer
-```
-
-The `detect_library` method identifies the library a type belongs to by checking:
-- Built-in Python types
-- Type annotations from typing module
-- Module paths and attributes
-- Library-specific type patterns
-
-When automatic detection is used, you only need to specify the target library. If detection fails, a `ValueError` is raised with a helpful message.
 
 ---
 
@@ -366,29 +241,6 @@ Converts the input data from the source type to the target type.
   - `data`: The data to convert (e.g., a dictionary, model instance, or dataframe).
 - **Returns**: The converted data in the target type.
 - **Raises**:
-  - `ValueError`: If the conversion is unsupported or the data is invalid.
-  - `ImportError`: If a required dependency is missing.
-
-#### `convert_single(self, data: Any, coerce: bool = False) -> Any`
-Converts a single item to the target type. This is an enhanced method for cases where you specifically want to convert an individual item rather than a collection.
-
-- **Parameters**:
-  - `data`: The data to convert (e.g., a dictionary or model instance).
-  - `coerce`: If True, allows type coercion for stricter types like Pydantic models.
-- **Returns**: The converted data in the target type.
-- **Raises**:
-  - `ValueError`: If the conversion is unsupported or the data is invalid.
-  - `ImportError`: If a required dependency is missing.
-
-#### `convert_collection(self, data: List[Any], coerce: bool = False) -> Any`
-Converts a collection of items to the target type. This method is specialized for handling collections and provides better error messages for collection-specific conversions.
-
-- **Parameters**:
-  - `data`: The list of data to convert.
-  - `coerce`: If True, allows type coercion for stricter types like Pydantic models.
-- **Returns**: The converted collection in the target type.
-- **Raises**:
-  - `TypeError`: If data is not a list (except for DataFrames).
   - `ValueError`: If the conversion is unsupported or the data is invalid.
   - `ImportError`: If a required dependency is missing.
 
@@ -420,62 +272,24 @@ Converts a canonical type to a library-specific type.
   - `ValueError`: If the canonical type or library is unsupported.
   - `ImportError`: If a required dependency is missing.
 
-#### `map_type(self, type_obj: Any, to_library: str, from_library: Optional[str] = None) -> Any`
+#### `map_type(self, type_obj: Any, from_library: str, to_library: str) -> Any`
 Maps a type from one library to another via the canonical type system.
 
 - **Parameters**:
   - `type_obj`: The type object to map (e.g., `int`, `sqlalchemy.Integer`).
+  - `from_library`: The source library name (e.g., 'python', 'sqlalchemy').
   - `to_library`: The target library name (e.g., 'python', 'pandas').
-  - `from_library`: The source library name (e.g., 'python', 'sqlalchemy'). If None, the library will be auto-detected.
 - **Returns**: A type object from the target library.
 - **Raises**:
-  - `ValueError`: If the type or library is unsupported or auto-detection fails.
+  - `ValueError`: If the type or library is unsupported.
   - `ImportError`: If a required dependency is missing.
 
-#### `detect_library(self, type_obj: Any) -> str`
-Automatically detects which library a type object belongs to.
-
-- **Parameters**:
-  - `type_obj`: The type object to detect the library for (e.g., `int`, `sqlalchemy.Integer`).
-- **Returns**: A string representing the detected library (e.g., 'python', 'sqlalchemy', 'pandas', 'polars').
-- **Raises**:
-  - `ValueError`: If the library cannot be detected.
-
-#### `_convert_nested(self, data: Any, target_type: Type) -> Any`
-Recursively converts nested data structures like dictionaries and lists while preserving their structure.
-
-- **Parameters**:
-  - `data`: The nested data structure to convert.
-  - `target_type`: The target type for individual elements.
-- **Returns**: The converted nested structure with the same hierarchy.
-
 ---
-
-## Error Handling
-
-The library provides custom exceptions for better error handling:
-
-- `TypeConversionError`: Base exception for all conversion errors (subclasses `ValueError`).
-- `UnsupportedTypeError`: Raised when a conversion is not supported.
-- `MissingLibraryError`: Raised when a required library is not installed (subclasses `ImportError`).
-
-These can be caught in your code:
-
-```python
-from politipo.type_converter import TypeConversionError, MissingLibraryError
-
-try:
-    result = converter.convert(data)
-except TypeConversionError as e:
-    print(f"Conversion error: {e}")
-except MissingLibraryError as e:
-    print(f"Missing dependency: {e}")
-```
 
 ## Best Practices
 
 - **Use Type Hints**: Always specify `from_type` and `to_type` with type hints to ensure clarity and leverage runtime type checking.
-- **Handle Errors**: Wrap conversions in try-except blocks to catch errors appropriately:
+- **Handle Errors**: Wrap conversions in try-except blocks to catch `ValueError` (unsupported conversions) or `ImportError` (missing dependencies):
   ```python
   try:
       result = converter.convert(data)
@@ -484,8 +298,9 @@ except MissingLibraryError as e:
   except ImportError as e:
       print(f"Missing dependency: {e}")
   ```
-- **Use Specialized Methods**: For clearer code intent, use `convert_single()` for individual items and `convert_collection()` for collections.
-- **Process Nested Structures**: Use `_convert_nested()` when dealing with complex nested data structures that need to maintain their hierarchy.
+- **Optimize Performance**: For large datasets (e.g., dataframes), test conversion performance and consider batching if necessary.
+- **Lazy Importing**: Take advantage of `politipo`'s lazy importing to avoid unnecessary dependencies. Only import required libraries when you actually use them.
+- **Use TypeMapper with TypeConverter**: For complex data pipelines, use TypeMapper to determine compatible types between different libraries, then use TypeConverter to perform the actual data conversions.
 
 ---
 
@@ -582,120 +397,3 @@ Below is an updated Markdown table that includes all available combinations of `
    - The ❌ entries show examples of inputs that would fail, with "N/A" for outputs since they aren't produced.
    - Unsupported conversions will raise a specific ValueError with a descriptive message explaining the issue.
    - The error messages clearly indicate whether the source type (`from_type`) or target type (`to_type`) is unsupported.
-
----
-
-## Development
-
-This project uses uv for dependency management and ruff/black/ty for quality.
-
-### Setup
-
-1) Install uv (see https://docs.astral.sh/uv/)
-2) Sync dev dependencies:
-
-```
-uv sync --group dev
-```
-
-### Common tasks
-
-```
-# Lint
-uv run ruff check .
-
-# Auto-fix lint
-uv run ruff check . --fix
-
-# Format
-uv run black .
-
-# Format check
-uv run black --check .
-
-# Type-check (ty)
-uv run ty
-
-# Run tests against src/
-PYTHONPATH=src uv run pytest -q src
-```
-
-## Repository Layout
-
-- New library: `src/politipo.py` with tests under `src/`.
-- Legacy code and examples: `legacy/` (excluded from lint/CI packaging scope).
-
-## Install With uv Only
-
-- Base install (minimal deps):
-```
-uv pip install .
-```
-
-- Install extras only when needed:
-```
-# Arrow/Parquet
-uv pip install '.[arrow]'
-
-# Polars
-uv pip install '.[polars]'
-
-# DuckDB
-uv pip install '.[duckdb]'
-
-# Validation (Pandera) and optional Pandas fallback
-uv pip install '.[validation]'
-uv pip install '.[pandas]'
-
-# Everything
-uv pip install '.[all]'
-```
-
-Or in a synced dev environment:
-```
-uv sync --group dev
-```
-
-Note: This project uses uv exclusively; pip/poetry are not used in CI or docs.
-
-### Pre-commit
-
-Install and run local hooks:
-
-```
-uv run pre-commit install
-uv run pre-commit run --all-files
-```
-
-### CI
-
-GitHub Actions (Python 3.14) runs: ruff, black --check, ty, and pytest with `PYTHONPATH=src`.
-
----
-
-## Makefile
-
-For convenience, common tasks are available via `make`:
-
-```
-# One-time: install dev deps (uses a PyO3 3.14 compatibility env var)
-make sync
-
-# Quality
-make lint
-make fix
-make fmt
-make fmt-check
-make type
-
-# Tests (targets src/ by default)
-make test
-
-# Pre-commit hooks
-make pre-commit
-```
-
-Note: On Python 3.14, pydantic-core builds via PyO3 may need the
-`PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` environment variable. The Makefile and CI
-set this automatically. If you still encounter build issues on 3.14, consider
-using Python 3.13 temporarily until upstream packages fully support 3.14.
