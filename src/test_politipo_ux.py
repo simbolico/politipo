@@ -86,6 +86,12 @@ def test_pandera_additional_constraints():
         pt.PolyTransporter(UXModel).to_polars([bad], validate=True)
 
 
+def test_generate_ddl_with_sqlalchemy_if_available():
+    ddl = pt.PolyTransporter(UXModel).generate_ddl("sql+postgresql", "ux_table")
+    assert isinstance(ddl, str)
+    assert "CREATE TABLE" in ddl and "ux_table" in ddl
+
+
 def test_require_messages():
     # Simulate missing extras and confirm helpful messages
     with pytest.raises(ImportError) as e:

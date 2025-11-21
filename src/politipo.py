@@ -644,8 +644,53 @@ class PolyTransporter:
             return None
         return pa.schema([v.get_arrow_field(k) for k, v in self.spec.fields.items()])
 
-    def generate_ddl(self, dialect: Literal["duckdb", "kuzu", "sql"], table_name: str) -> str:
+    def generate_ddl(self, dialect: Literal["duckdb", "kuzu", "sql"] | str, table_name: str) -> str:
         """Generates CREATE TABLE statements for infrastructure."""
+        # Optional: SQLAlchemy-backed compilation when available via
+        # dialect strings like 'sql+postgresql'
+        if isinstance(dialect, str) and dialect.startswith("sql+") and SQL_AVAILABLE:
+            target = dialect.split("+", 1)[1]
+            try:
+                import sqlalchemy.dialects as sad
+
+                # Map common aliases to SQLAlchemy dialect classes
+                dialect_map = {
+                    "postgres": sad.postgresql.dialect(),
+                    "postgresql": sad.postgresql.dialect(),
+                    "sqlite": sad.sqlite.dialect(),
+                    "mysql": sad.mysql.dialect(),
+                    "mariadb": sad.mysql.dialect(),
+                }
+                d = dialect_map.get(target)
+            except Exception:
+                d = None
+
+            def compile_type(ts: TypeSpec) -> str:
+                t = ts.sql
+                # If a simple string was provided, use it
+                if isinstance(t, str):
+                    return t
+                # Instantiate callables like sa.String -> sa.String()
+                try:
+                    inst = t() if callable(t) else t
+                except Exception:
+                    inst = t
+                try:
+                    if d is not None and hasattr(inst, "compile"):
+                        return inst.compile(dialect=d)
+                except Exception:
+                    pass
+                # Fallback to duckdb type name if compilation not possible
+                return ts.duckdb
+
+            cols = ", ".join(
+                f"{k} {compile_type(v)}" + (" PRIMARY KEY" if v.is_pk else "")
+                for k, v in self.spec.fields.items()
+            )
+            return f"CREATE TABLE IF NOT EXISTS {table_name} ({cols});"
+        elif isinstance(dialect, str) and dialect.startswith("sql+") and not SQL_AVAILABLE:
+            # Fallback to generic SQL if SQLAlchemy is not available
+            dialect = "sql"
         if dialect == "duckdb":
             cols = ", ".join(
                 f"{k} {v.duckdb}" + (" PRIMARY KEY" if v.is_pk else "")
