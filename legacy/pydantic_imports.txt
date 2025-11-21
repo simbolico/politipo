@@ -1,0 +1,16 @@
+# Check if Pydantic is installed
+try:
+    import pydantic
+    from pydantic import BaseModel, Field, EmailStr, SecretStr
+    has_pydantic = True
+
+    # Check Pydantic version
+    is_v2 = hasattr(BaseModel, "model_dump")
+    if is_v2:
+        from typing import Annotated
+except ImportError:
+    has_pydantic = False
+    is_v2 = False
+
+
+def find_in_tuple_dict(tuple_dict: Tuple, key: str) -> bool:

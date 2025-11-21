@@ -4,7 +4,7 @@
 
 _**User**_
 
-@types 
+@types
 
 please help me create those files:
 
@@ -35,7 +35,7 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 class Constraint(ABC):
     """Base class for all type constraints."""
-    
+
     @abstractmethod
     def validate(self, value: Any) -> bool:
         """Returns True if value satisfies the constraint."""
@@ -55,7 +55,7 @@ class Constraint(ABC):
 
 class TypeMeta(ABC):
     """Metadata attached to canonical types (e.g., SQL 'NOT NULL')."""
-    
+
     @abstractmethod
     def merge(self, other: "TypeMeta") -> "TypeMeta":
         """Combines two metadata objects."""
@@ -72,7 +72,7 @@ from core.types.abstract import Constraint, TypeMeta
 @runtime_checkable
 class TypeSystem(Protocol):
     """Protocol that all type system plugins must implement."""
-    
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -125,7 +125,7 @@ class CanonicalType:
     def _validate(self):
         if self.kind == "container" and "item_type" not in self.params:
             raise ValueError("Container types must specify 'item_type'")
-        
+
         if self.kind == "generic" and not self.params.get("type_params"):
             raise ValueError("Generic types require type_params")
 
@@ -272,16 +272,16 @@ new_type = user_id_type.with_constraint(MaxLength(10))  # Error: MyPy catches in
 
 ## **5. Design Justifications**
 
-1. **Immutability**  
+1. **Immutability**
    - `CanonicalType` is frozen to enable caching and safe sharing.
 
-2. **Separation of Concerns**  
+2. **Separation of Concerns**
    - Constraints are decoupled from the type system for flexibility.
 
-3. **Protocols over ABCs**  
+3. **Protocols over ABCs**
    - `TypeSystem` uses `Protocol` to avoid inheritance coupling.
 
-4. **Serialization**  
+4. **Serialization**
    - Constraints implement `to_dict`/`from_dict` for persistence.
 
 ---
@@ -314,38 +314,38 @@ Now, let's create each file one by one. I'll start with the abstract base classe
 ---
 
 ```diff
-- 
+-
 + from abc import ABC, abstractmethod
 + from typing import Any, Dict, Optional, Protocol, runtime_checkable
-+ 
-+ 
++
++
 + class Constraint(ABC):
 +     """Base class for all type constraints."""
-+     
++
 +     @abstractmethod
 +     def validate(self, value: Any) -> bool:
 +         """Returns True if value satisfies the constraint."""
 +         pass
-+ 
++
 +     @abstractmethod
 +     def to_dict(self) -> Dict[str, Any]:
 +         """Serializes the constraint for storage."""
 +         pass
-+ 
++
 +     @classmethod
 +     @abstractmethod
 +     def from_dict(cls, data: Dict[str, Any]) -> "Constraint":
 +         """Deserializes a constraint."""
 +         pass
-+ 
-+ 
++
++
 + class TypeMeta(ABC):
 +     """Metadata attached to canonical types (e.g., SQL 'NOT NULL')."""
-+     
++
 +     @abstractmethod
 +     def merge(self, other: "TypeMeta") -> "TypeMeta":
 +         """Combines two metadata objects."""
-+         pass 
++         pass
 ```
 
 ---
@@ -355,42 +355,42 @@ Next, let's create the protocols file:
 ---
 
 ```diff
-- 
+-
 + from typing import Protocol, runtime_checkable, Any, Dict
 + from abc import abstractmethod
-+ 
-+ 
++
++
 + @runtime_checkable
 + class TypeSystem(Protocol):
 +     """Protocol that all type system plugins must implement."""
-+     
++
 +     @property
 +     @abstractmethod
 +     def name(self) -> str:
 +         """Unique name of the type system (e.g., 'pydantic')."""
 +         pass
-+ 
++
 +     @abstractmethod
 +     def to_canonical(self, type_obj: Any) -> "CanonicalType":
 +         """Converts a native type to CanonicalType."""
 +         pass
-+ 
++
 +     @abstractmethod
 +     def from_canonical(self, canonical: "CanonicalType") -> Any:
 +         """Reconstructs a native type from CanonicalType."""
 +         pass
-+ 
++
 +     @abstractmethod
 +     def detect(self, obj: Any) -> bool:
 +         """Returns True if the object belongs to this type system."""
 +         pass
-+ 
-+ 
++
++
 + @runtime_checkable
 + class ConstraintProtocol(Protocol):
 +     """Protocol for constraint implementations."""
 +     def validate(self, value: Any) -> bool: ...
-+     def to_dict(self) -> Dict[str, Any]: ... 
++     def to_dict(self) -> Dict[str, Any]: ...
 ```
 
 ---
@@ -400,12 +400,12 @@ Now, let's create the canonical type implementation:
 ---
 
 ```diff
-- 
+-
 + from dataclasses import dataclass, field
 + from typing import Literal, Dict, Any, Optional, List
 + from .abstract import Constraint, TypeMeta
-+ 
-+ 
++
++
 + @dataclass(frozen=True)
 + class CanonicalType:
 +     """Immutable representation of a type across all systems."""
@@ -414,17 +414,17 @@ Now, let's create the canonical type implementation:
 +     params: Dict[str, Any] = field(default_factory=dict)
 +     constraints: Dict[str, Constraint] = field(default_factory=dict)
 +     meta: Optional[TypeMeta] = None
-+ 
++
 +     def __post_init__(self):
 +         self._validate()
-+ 
++
 +     def _validate(self):
 +         if self.kind == "container" and "item_type" not in self.params:
 +             raise ValueError("Container types must specify 'item_type'")
-+         
++
 +         if self.kind == "generic" and not self.params.get("type_params"):
 +             raise ValueError("Generic types require type_params")
-+ 
++
 +     def with_constraint(self, constraint: Constraint) -> "CanonicalType":
 +         """Returns a new CanonicalType with an added constraint."""
 +         new_constraints = {**self.constraints, constraint.__class__.__name__: constraint}
@@ -434,7 +434,7 @@ Now, let's create the canonical type implementation:
 +             params=self.params,
 +             constraints=new_constraints,
 +             meta=self.meta
-+         ) 
++         )
 ```
 
 ---
@@ -444,54 +444,54 @@ Let's create the constraints implementation:
 ---
 
 ```diff
-- 
+-
 + from dataclasses import dataclass
 + from typing import Any, Dict
 + from .abstract import Constraint
-+ 
-+ 
++
++
 + @dataclass(frozen=True)
 + class MinValue(Constraint):
 +     """Numeric minimum constraint."""
 +     value: float
-+ 
++
 +     def validate(self, val: Any) -> bool:
 +         return float(val) >= self.value
-+ 
++
 +     def to_dict(self) -> Dict[str, Any]:
 +         return {"type": "min_value", "value": self.value}
-+ 
++
 +     @classmethod
 +     def from_dict(cls, data: Dict[str, Any]) -> "MinValue":
 +         return cls(value=data["value"])
-+ 
-+ 
++
++
 + @dataclass(frozen=True)
 + class MaxLength(Constraint):
 +     """String/collection maximum length constraint."""
 +     value: int
-+ 
++
 +     def validate(self, val: Any) -> bool:
 +         return len(val) <= self.value
-+ 
++
 +     def to_dict(self) -> Dict[str, Any]:
 +         return {"type": "max_length", "value": self.value}
-+ 
++
 +     @classmethod
 +     def from_dict(cls, data: Dict[str, Any]) -> "MaxLength":
 +         return cls(value=data["value"])
-+ 
-+ 
++
++
 + # Registry for deserialization
 + _CONSTRAINT_REGISTRY = {
 +     "min_value": MinValue,
 +     "max_length": MaxLength
 + }
-+ 
-+ 
++
++
 + def constraint_from_dict(data: Dict[str, Any]) -> Constraint:
 +     """Factory method for deserializing constraints."""
-+     return _CONSTRAINT_REGISTRY[data["type"]].from_dict(data) 
++     return _CONSTRAINT_REGISTRY[data["type"]].from_dict(data)
 ```
 
 ---
@@ -501,7 +501,7 @@ Finally, let's create the __init__.py file to expose the public API:
 ---
 
 ```diff
-- 
+-
 + from .canonical import CanonicalType
 + from .abstract import Constraint, TypeMeta
 + from .protocols import TypeSystem, ConstraintProtocol
@@ -510,7 +510,7 @@ Finally, let's create the __init__.py file to expose the public API:
 +     MaxLength,
 +     constraint_from_dict
 + )
-+ 
++
 + __all__ = [
 +     "CanonicalType",
 +     "Constraint",
@@ -520,7 +520,7 @@ Finally, let's create the __init__.py file to expose the public API:
 +     "MinValue",
 +     "MaxLength",
 +     "constraint_from_dict"
-+ ] 
++ ]
 ```
 
 ---
@@ -583,7 +583,7 @@ politipo/core/
 │   ├── strategies/        # Strategy implementations
 │   │   ├── base.py        # BaseStrategy
 │   │   ├── pandas_to_pydantic.py
-│   │   └── ...            
+│   │   └── ...
 │   └── executor.py        # JIT/batched execution
 plugins/
 ├── pydantic/
@@ -629,10 +629,10 @@ class ConversionEngine:
         """Convert a value to a target type system."""
         # Detect source type system
         source_system = self._detect_source_system(value)
-        
+
         # Resolve target system
         target_system = (
-            self._type_systems[target] if isinstance(target, str) 
+            self._type_systems[target] if isinstance(target, str)
             else target
         )
 
@@ -723,7 +723,7 @@ class PandasTypeSystem(TypeSystem):
         import pandas as pd
         return pd.DataFrame(
             {col: [] for col in canonical.params["columns"]},
-            dtype={col: self._canonical_to_dtype(t) 
+            dtype={col: self._canonical_to_dtype(t)
                   for col, t in canonical.params["columns"].items()}
         )
 
@@ -744,8 +744,8 @@ from typing import Any
 class ConversionStrategy(ABC):
     @abstractmethod
     def can_handle(
-        self, 
-        source: CanonicalType, 
+        self,
+        source: CanonicalType,
         target: CanonicalType
     ) -> bool:
         """Whether this strategy can handle the conversion."""
@@ -753,7 +753,7 @@ class ConversionStrategy(ABC):
 
     @abstractmethod
     def convert(
-        self, 
+        self,
         value: Any,
         context: "ConversionContext"
     ) -> Any:
@@ -824,11 +824,11 @@ class TypeGraph:
         # with strategy weights (e.g., direct > canonical)
         if source.name == target.name:
             return []
-        
+
         # Check for direct strategy
         if target.name in self._edges.get(source.name, {}):
             return [self._edges[source.name][target.name]]
-        
+
         # Fall back to canonical intermediate
         return [
             self._edges[source.name]["canonical"],
@@ -865,20 +865,20 @@ user = User(name="Bob", age=25)       # Now usable as a normal Pydantic model
 
 ## **Key Features Implemented**
 
-1. **Plugin Architecture**  
+1. **Plugin Architecture**
    - New type systems can be added without modifying core code.
 
-2. **Strategy Pattern**  
+2. **Strategy Pattern**
    - Each conversion is handled by a dedicated strategy class.
 
-3. **Performance Optimizations**  
-   - `@lru_cache` on row conversion  
+3. **Performance Optimizations**
+   - `@lru_cache` on row conversion
    - JIT-friendly design
 
-4. **Type Safety**  
+4. **Type Safety**
    - MyPy will catch invalid conversions at dev time.
 
-5. **Constraint Propagation**  
+5. **Constraint Propagation**
    - Pandas `dtype` → Pydantic `Field` constraints preserved.
 
 ---
@@ -910,53 +910,53 @@ Let's start implementing the core conversion components. First, let's create the
 ---
 
 ```diff
-- 
+-
 + from abc import ABC, abstractmethod
 + from typing import Any, Dict, Optional, TYPE_CHECKING
-+ 
++
 + if TYPE_CHECKING:
 +     from politipo.core.types import CanonicalType
 +     from politipo.core.conversion.engine import ConversionContext
-+ 
-+ 
++
++
 + class ConversionStrategy(ABC):
 +     """Base class for all type conversion strategies."""
-+ 
++
 +     @abstractmethod
 +     def can_handle(
-+         self, 
-+         source: "CanonicalType", 
++         self,
++         source: "CanonicalType",
 +         target: "CanonicalType"
 +     ) -> bool:
 +         """
 +         Whether this strategy can handle the conversion.
-+         
++
 +         Args:
 +             source: Source type to convert from
 +             target: Target type to convert to
-+             
++
 +         Returns:
 +             True if this strategy can handle the conversion
 +         """
 +         pass
-+ 
++
 +     @abstractmethod
 +     def convert(
-+         self, 
++         self,
 +         value: Any,
 +         context: "ConversionContext"
 +     ) -> Any:
 +         """
 +         Perform the actual conversion.
-+         
++
 +         Args:
 +             value: The value to convert
 +             context: Conversion context with type information
-+             
++
 +         Returns:
 +             The converted value
 +         """
-+         pass 
++         pass
 ```
 
 ---
@@ -966,14 +966,14 @@ Now, let's implement the conversion engine:
 ---
 
 ```diff
-- 
+-
 + from dataclasses import dataclass
 + from typing import Dict, Type, Any, Optional, Union, List
 + from politipo.core.types import CanonicalType, TypeSystem
 + from politipo.core.conversion.graph import TypeGraph
 + from politipo.core.conversion.strategies.base import ConversionStrategy
-+ 
-+ 
++
++
 + @dataclass
 + class ConversionContext:
 +     """Context object passed to conversion strategies."""
@@ -982,23 +982,23 @@ Now, let's implement the conversion engine:
 +     source_type_system: TypeSystem
 +     target_type_system: TypeSystem
 +     strict: bool = True
-+ 
-+ 
++
++
 + class ConversionEngine:
 +     """Core engine for managing type conversions between different systems."""
-+ 
++
 +     def __init__(self):
 +         self._type_systems: Dict[str, TypeSystem] = {}
 +         self._strategies: Dict[str, ConversionStrategy] = {}
 +         self._graph = TypeGraph()
-+ 
++
 +     def register_type_system(self, type_system: TypeSystem) -> None:
 +         """
 +         Register a new type system plugin.
-+         
++
 +         Args:
 +             type_system: The type system to register
-+             
++
 +         Raises:
 +             ValueError: If a type system with the same name is already registered
 +         """
@@ -1006,22 +1006,22 @@ Now, let's implement the conversion engine:
 +             raise ValueError(f"TypeSystem '{type_system.name}' already registered")
 +         self._type_systems[type_system.name] = type_system
 +         self._graph.add_type_system(type_system)
-+ 
++
 +     def register_strategy(self, name: str, strategy: ConversionStrategy) -> None:
 +         """
 +         Register a new conversion strategy.
-+         
++
 +         Args:
 +             name: Unique name for the strategy
 +             strategy: The strategy implementation
-+             
++
 +         Raises:
 +             ValueError: If a strategy with the same name exists
 +         """
 +         if name in self._strategies:
 +             raise ValueError(f"Strategy '{name}' already registered")
 +         self._strategies[name] = strategy
-+ 
++
 +     def convert(
 +         self,
 +         value: Any,
@@ -1031,31 +1031,31 @@ Now, let's implement the conversion engine:
 +     ) -> Any:
 +         """
 +         Convert a value to a target type system.
-+         
++
 +         Args:
 +             value: The value to convert
 +             target: Target type system name or instance
 +             strict: Whether to enforce strict type checking
-+             
++
 +         Returns:
 +             The converted value
-+             
++
 +         Raises:
 +             ValueError: If no conversion path is found
 +         """
 +         # Detect source type system
 +         source_system = self._detect_source_system(value)
-+         
++
 +         # Resolve target system
 +         target_system = (
-+             self._type_systems[target] if isinstance(target, str) 
++             self._type_systems[target] if isinstance(target, str)
 +             else target
 +         )
-+ 
++
 +         # Get canonical types
 +         source_type = source_system.to_canonical(value)
 +         target_type = target_system.from_canonical(source_type)
-+ 
++
 +         # Create context
 +         context = ConversionContext(
 +             source=source_type,
@@ -1064,28 +1064,28 @@ Now, let's implement the conversion engine:
 +             target_type_system=target_system,
 +             strict=strict
 +         )
-+ 
++
 +         # Find conversion path
 +         path = self._graph.find_path(
 +             source=source_system,
 +             target=target_system,
 +             value=value
 +         )
-+ 
++
 +         # Execute conversion chain
 +         current_value = value
 +         for strategy_name in path:
 +             strategy = self._strategies[strategy_name]
 +             current_value = strategy.convert(current_value, context)
-+ 
++
 +         return current_value
-+ 
++
 +     def _detect_source_system(self, value: Any) -> TypeSystem:
 +         """Find the type system that can handle the given value."""
 +         for system in self._type_systems.values():
 +             if system.detect(value):
 +                 return system
-+         raise ValueError(f"No TypeSystem found for value: {type(value)}") 
++         raise ValueError(f"No TypeSystem found for value: {type(value)}")
 ```
 
 ---
@@ -1095,30 +1095,30 @@ Let's implement the type conversion graph:
 ---
 
 ```diff
-- 
+-
 + from typing import Dict, List, Optional, Set, Any
 + from collections import deque
 + from politipo.core.types import TypeSystem
-+ 
-+ 
++
++
 + class TypeGraph:
 +     """Graph structure for managing type system conversion paths."""
-+ 
++
 +     def __init__(self):
 +         self._nodes: Dict[str, TypeSystem] = {}
 +         self._edges: Dict[str, Dict[str, str]] = {}  # {source: {target: strategy_name}}
-+ 
++
 +     def add_type_system(self, system: TypeSystem) -> None:
 +         """
 +         Register a type system node.
-+         
++
 +         Args:
 +             system: The type system to add
 +         """
 +         self._nodes[system.name] = system
 +         if system.name not in self._edges:
 +             self._edges[system.name] = {}
-+ 
++
 +     def register_strategy(
 +         self,
 +         source: TypeSystem,
@@ -1127,7 +1127,7 @@ Let's implement the type conversion graph:
 +     ) -> None:
 +         """
 +         Add a conversion path between systems.
-+         
++
 +         Args:
 +             source: Source type system
 +             target: Target type system
@@ -1136,7 +1136,7 @@ Let's implement the type conversion graph:
 +         if source.name not in self._edges:
 +             self._edges[source.name] = {}
 +         self._edges[source.name][target.name] = strategy
-+ 
++
 +     def find_path(
 +         self,
 +         source: TypeSystem,
@@ -1145,46 +1145,46 @@ Let's implement the type conversion graph:
 +     ) -> List[str]:
 +         """
 +         Find optimal conversion path using BFS.
-+         
++
 +         Args:
 +             source: Source type system
 +             target: Target type system
 +             value: The value being converted (for optimization hints)
-+             
++
 +         Returns:
 +             List of strategy names forming the conversion path
-+             
++
 +         Raises:
 +             ValueError: If no path exists between source and target
 +         """
 +         if source.name == target.name:
 +             return []
-+ 
++
 +         # Check for direct strategy
 +         if target.name in self._edges.get(source.name, {}):
 +             return [self._edges[source.name][target.name]]
-+ 
++
 +         # BFS for path
 +         queue = deque([(source.name, [])])
 +         visited = {source.name}
-+ 
++
 +         while queue:
 +             current, path = queue.popleft()
-+             
++
 +             for next_system, strategy in self._edges[current].items():
 +                 if next_system == target.name:
 +                     return path + [strategy]
-+                     
++
 +                 if next_system not in visited:
 +                     visited.add(next_system)
 +                     queue.append((
 +                         next_system,
 +                         path + [strategy]
 +                     ))
-+ 
++
 +         raise ValueError(
 +             f"No conversion path found from {source.name} to {target.name}"
-+         ) 
++         )
 ```
 
 ---
@@ -1194,66 +1194,66 @@ Now, let's implement the Pandas to Pydantic conversion strategy:
 ---
 
 ```diff
-- 
+-
 + from functools import lru_cache
 + from typing import Any, Type, Dict
-+ 
++
 + import pandas as pd
 + from pydantic import BaseModel
-+ 
++
 + from politipo.core.conversion.strategies.base import ConversionStrategy
 + from politipo.core.types import CanonicalType
 + from politipo.core.conversion.engine import ConversionContext
-+ 
-+ 
++
++
 + class DataFrameToModelStrategy(ConversionStrategy):
 +     """Strategy for converting Pandas DataFrames to Pydantic models."""
-+ 
++
 +     def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 +         """Check if this strategy can handle the conversion."""
 +         return (
 +             source.kind == "composite" and source.name == "DataFrame"
 +             and target.kind == "composite" and target.name == "Model"
 +         )
-+ 
++
 +     def convert(self, df: pd.DataFrame, context: ConversionContext) -> list[BaseModel]:
 +         """
 +         Convert DataFrame rows to Pydantic model instances.
-+         
++
 +         Args:
 +             df: Source DataFrame
 +             context: Conversion context
-+             
++
 +         Returns:
 +             List of Pydantic model instances
 +         """
 +         model_type = context.target_type_system.from_canonical(context.target)
-+         
++
 +         if context.strict:
 +             # Validate column names match model fields
 +             model_fields = set(model_type.model_fields.keys())
 +             df_columns = set(df.columns)
-+             
++
 +             missing = model_fields - df_columns
 +             if missing:
 +                 raise ValueError(
 +                     f"DataFrame missing required fields: {missing}"
 +                 )
-+             
++
 +             extra = df_columns - model_fields
 +             if extra:
 +                 raise ValueError(
 +                     f"DataFrame contains unknown fields: {extra}"
 +                 )
-+ 
++
 +         return [
 +             self._convert_row(
 +                 tuple(row.items()),  # Make row hashable for caching
 +                 model_type
-+             ) 
++             )
 +             for _, row in df.iterrows()
 +         ]
-+ 
++
 +     @lru_cache(maxsize=1024)
 +     def _convert_row(
 +         self,
@@ -1262,15 +1262,15 @@ Now, let's implement the Pandas to Pydantic conversion strategy:
 +     ) -> BaseModel:
 +         """
 +         Convert a single DataFrame row to a model instance.
-+         
++
 +         Args:
 +             row_items: Row data as tuple of (column, value) pairs
 +             model_type: Target Pydantic model class
-+             
++
 +         Returns:
 +             Instantiated model
 +         """
-+         return model_type(**dict(row_items)) 
++         return model_type(**dict(row_items))
 ```
 
 ---
@@ -1280,24 +1280,24 @@ Let's implement the Pydantic type system plugin:
 ---
 
 ```diff
-- 
+-
 + from typing import Any, Dict, Type, get_type_hints
 + from pydantic import BaseModel, Field, create_model
 + from politipo.core.types import TypeSystem, CanonicalType
-+ 
-+ 
++
++
 + class PydanticTypeSystem(TypeSystem):
 +     """Type system implementation for Pydantic models."""
-+     
++
 +     name = "pydantic"
-+ 
++
 +     def to_canonical(self, model: Type[BaseModel]) -> CanonicalType:
 +         """
 +         Convert a Pydantic model to canonical type.
-+         
++
 +         Args:
 +             model: Pydantic model class
-+             
++
 +         Returns:
 +             Canonical type representation
 +         """
@@ -1305,26 +1305,26 @@ Let's implement the Pydantic type system plugin:
 +         for name, field in model.model_fields.items():
 +             field_type = self._py_type_to_canonical(field.annotation)
 +             constraints = self._field_to_constraints(field)
-+             
++
 +             fields[name] = {
 +                 "type": field_type,
 +                 "constraints": constraints,
 +                 "required": field.is_required()
 +             }
-+             
++
 +         return CanonicalType(
 +             kind="composite",
 +             name=model.__name__,
 +             params={"fields": fields}
 +         )
-+ 
++
 +     def from_canonical(self, canonical: CanonicalType) -> Type[BaseModel]:
 +         """
 +         Create a Pydantic model from canonical type.
-+         
++
 +         Args:
 +             canonical: Canonical type representation
-+             
++
 +         Returns:
 +             Generated Pydantic model class
 +         """
@@ -1334,20 +1334,20 @@ Let's implement the Pydantic type system plugin:
 +             field_kwargs = self._constraints_to_field_kwargs(
 +                 field_info["constraints"]
 +             )
-+             
++
 +             if not field_info.get("required", True):
 +                 field_kwargs["default"] = None
-+                 
++
 +             fields[name] = (py_type, Field(**field_kwargs))
-+             
++
 +         return create_model(canonical.name, **fields)
-+ 
++
 +     def detect(self, obj: Any) -> bool:
 +         """Check if object is a Pydantic model."""
 +         return isinstance(obj, BaseModel) or (
 +             isinstance(obj, type) and issubclass(obj, BaseModel)
 +         )
-+ 
++
 +     def _py_type_to_canonical(self, py_type: Type) -> CanonicalType:
 +         """Convert Python type to canonical type."""
 +         # Basic types
@@ -1356,7 +1356,7 @@ Let's implement the Pydantic type system plugin:
 +                 kind="primitive",
 +                 name=py_type.__name__
 +             )
-+             
++
 +         # Container types
 +         if hasattr(py_type, "__origin__"):
 +             origin = py_type.__origin__
@@ -1367,13 +1367,13 @@ Let's implement the Pydantic type system plugin:
 +                     name=origin.__name__,
 +                     params={"item_type": item_type}
 +                 )
-+                 
++
 +         # Default to Any
 +         return CanonicalType(
 +             kind="primitive",
 +             name="any"
 +         )
-+ 
++
 +     def _canonical_to_py_type(self, canonical: CanonicalType) -> Type:
 +         """Convert canonical type to Python type."""
 +         if canonical.kind == "primitive":
@@ -1385,7 +1385,7 @@ Let's implement the Pydantic type system plugin:
 +                 "any": Any
 +             }
 +             return type_map.get(canonical.name, Any)
-+             
++
 +         if canonical.kind == "container":
 +             container_map = {
 +                 "list": list,
@@ -1397,13 +1397,13 @@ Let's implement the Pydantic type system plugin:
 +                 canonical.params["item_type"]
 +             )
 +             return container[item_type]
-+             
++
 +         return Any
-+ 
++
 +     def _field_to_constraints(self, field: Any) -> Dict[str, Any]:
 +         """Extract constraints from Pydantic field."""
 +         constraints = {}
-+         
++
 +         if field.ge is not None:
 +             constraints["min_value"] = field.ge
 +         if field.le is not None:
@@ -1412,13 +1412,13 @@ Let's implement the Pydantic type system plugin:
 +             constraints["min_length"] = field.min_length
 +         if field.max_length is not None:
 +             constraints["max_length"] = field.max_length
-+             
++
 +         return constraints
-+ 
++
 +     def _constraints_to_field_kwargs(self, constraints: Dict[str, Any]) -> Dict[str, Any]:
 +         """Convert constraints to Pydantic field arguments."""
 +         kwargs = {}
-+         
++
 +         if "min_value" in constraints:
 +             kwargs["ge"] = constraints["min_value"]
 +         if "max_value" in constraints:
@@ -1427,8 +1427,8 @@ Let's implement the Pydantic type system plugin:
 +             kwargs["min_length"] = constraints["min_length"]
 +         if "max_length" in constraints:
 +             kwargs["max_length"] = constraints["max_length"]
-+             
-+         return kwargs 
++
++         return kwargs
 ```
 
 ---
@@ -1438,25 +1438,25 @@ Finally, let's implement the Pandas type system plugin:
 ---
 
 ```diff
-- 
+-
 + from typing import Any, Dict
 + import pandas as pd
 + import numpy as np
 + from politipo.core.types import TypeSystem, CanonicalType
-+ 
-+ 
++
++
 + class PandasTypeSystem(TypeSystem):
 +     """Type system implementation for Pandas DataFrames."""
-+     
++
 +     name = "pandas"
-+ 
++
 +     def to_canonical(self, df: pd.DataFrame) -> CanonicalType:
 +         """
 +         Convert a Pandas DataFrame to canonical type.
-+         
++
 +         Args:
 +             df: Source DataFrame
-+             
++
 +         Returns:
 +             Canonical type representation
 +         """
@@ -1470,14 +1470,14 @@ Finally, let's implement the Pandas type system plugin:
 +                 }
 +             }
 +         )
-+ 
++
 +     def from_canonical(self, canonical: CanonicalType) -> pd.DataFrame:
 +         """
 +         Create an empty DataFrame with the specified schema.
-+         
++
 +         Args:
 +             canonical: Canonical type representation
-+             
++
 +         Returns:
 +             Empty DataFrame with correct dtypes
 +         """
@@ -1485,11 +1485,11 @@ Finally, let's implement the Pandas type system plugin:
 +             {col: pd.Series(dtype=self._canonical_to_dtype(t))
 +              for col, t in canonical.params["columns"].items()}
 +         )
-+ 
++
 +     def detect(self, obj: Any) -> bool:
 +         """Check if object is a Pandas DataFrame."""
 +         return isinstance(obj, pd.DataFrame)
-+ 
++
 +     def _dtype_to_canonical(self, dtype: np.dtype) -> CanonicalType:
 +         """Convert Pandas dtype to canonical type."""
 +         if pd.api.types.is_integer_dtype(dtype):
@@ -1518,7 +1518,7 @@ Finally, let's implement the Pandas type system plugin:
 +                 kind="primitive",
 +                 name="str"
 +             )
-+ 
++
 +     def _canonical_to_dtype(self, canonical: CanonicalType) -> np.dtype:
 +         """Convert canonical type to Pandas dtype."""
 +         type_map = {
@@ -1528,7 +1528,7 @@ Finally, let's implement the Pandas type system plugin:
 +             "datetime": "datetime64[ns]",
 +             "str": "object"
 +         }
-+         return np.dtype(type_map.get(canonical.name, "object")) 
++         return np.dtype(type_map.get(canonical.name, "object"))
 ```
 
 ---
@@ -1538,19 +1538,19 @@ Let's create the __init__.py files for the plugins:
 ---
 
 ```diff
-- 
+-
 + from .types import PydanticTypeSystem
-+ 
-+ __all__ = ["PydanticTypeSystem"] 
++
++ __all__ = ["PydanticTypeSystem"]
 ```
 
 ---
 
 ```diff
-- 
+-
 + from .types import PandasTypeSystem
-+ 
-+ __all__ = ["PandasTypeSystem"] 
++
++ __all__ = ["PandasTypeSystem"]
 ```
 
 ---
@@ -1560,19 +1560,19 @@ And finally, let's create the __init__.py for the conversion module:
 ---
 
 ```diff
-- 
+-
 + from .engine import ConversionEngine, ConversionContext
 + from .graph import TypeGraph
 + from .strategies.base import ConversionStrategy
 + from .strategies.pandas_to_pydantic import DataFrameToModelStrategy
-+ 
++
 + __all__ = [
 +     "ConversionEngine",
 +     "ConversionContext",
 +     "TypeGraph",
 +     "ConversionStrategy",
 +     "DataFrameToModelStrategy"
-+ ] 
++ ]
 ```
 
 ---
@@ -1661,7 +1661,7 @@ Let's modify the imports in your main.py file:
 ```diff
   from politipo.plugins.pandas import PandasTypeSystem
   from politipo.plugins.pydantic import PydanticTypeSystem
-- 
+-
 + from politipo.core.conversion.strategies.pandas_to_pydantic import DataFrameToModelStrategy
   from pydantic import BaseModel
   import pandas as pd
@@ -1711,12 +1711,12 @@ The error occurs because we're trying to convert a DataFrame to a Pydantic model
 ---
 
 ```diff
-  
+
   # Convert DataFrame to list of User models
 - users = engine.convert(df, "pydantic")  # List[User]
 + # We need to specify the target model class
 + users = engine.convert(df, User)  # List[User]
-+ 
++
 + # Print results
 + for user in users:
 +     print(f"User: {user.name}, Age: {user.age}")
@@ -1777,15 +1777,15 @@ The error occurs because we're passing the Pydantic model class (`User`) directl
 + pydantic_system = PydanticTypeSystem()
 + engine.register_type_system(pandas_system)
 + engine.register_type_system(pydantic_system)
-  
+
   # Register conversion strategy
-  
+
   # Convert DataFrame to list of User models
 - # We need to specify the target model class
 - users = engine.convert(df, User)  # List[User]
 + # Pass the target type system and model class
 + users = engine.convert(df, pydantic_system)  # List[User]
-  
+
   # Print results
 ```
 
@@ -1835,16 +1835,16 @@ The error occurs because we need to specify the target Pydantic model when conve
 ---
 
 ```diff
-  
+
   # Convert DataFrame to list of User models
 - # Pass the target type system and model class
 - users = engine.convert(df, pydantic_system)  # List[User]
 + # First convert the DataFrame to a list of dictionaries
 + df_dicts = df.to_dict('records')
-+ 
++
 + # Create a list of User models
 + users = [User(**user_dict) for user_dict in df_dicts]
-  
+
   # Print results
 ```
 
@@ -1896,7 +1896,7 @@ Your implementation looks structurally sound and follows the architecture we dis
    @dataclass(frozen=True)
    class MinValue(Constraint):
        value: float
-       
+
        def __post_init__(self):
            if not isinstance(self.value, (int, float)):
                raise TypeError("MinValue requires numeric value")
@@ -1917,7 +1917,7 @@ Your implementation looks structurally sound and follows the architecture we dis
    class ConversionEngine:
        def __init__(self):
            self._conversion_cache = {}
-           
+
        def convert(self, value: Any, target: Union[str, TypeSystem], *, strict: bool = True) -> Any:
            cache_key = (id(value), target.name if isinstance(target, TypeSystem) else target)
            if cache_key in self._conversion_cache:
@@ -1929,23 +1929,23 @@ Your implementation looks structurally sound and follows the architecture we dis
 
 ## **Critical Missing Components**
 
-1. **Error Hierarchy**  
+1. **Error Hierarchy**
    Add a dedicated error module (`core/errors.py`):
    ```python
    class PolitipoError(Exception):
        """Base exception for all Politipo errors."""
-       
+
    class ConversionError(PolitipoError):
        """Base class for conversion failures."""
-       
+
    class NoConversionPathError(ConversionError):
        """Raised when no conversion path exists."""
-       
+
    class ConstraintViolationError(ConversionError):
        """Raised when a value violates constraints."""
    ```
 
-2. **Type System Registration Validation**  
+2. **Type System Registration Validation**
    In `ConversionEngine.register_type_system()`:
    ```python
    def register_type_system(self, type_system: TypeSystem):
@@ -1954,7 +1954,7 @@ Your implementation looks structurally sound and follows the architecture we dis
        ...
    ```
 
-3. **Strategy Pre-registration Checks**  
+3. **Strategy Pre-registration Checks**
    In `DataFrameToModelStrategy`:
    ```python
    def __init__(self):
@@ -1967,25 +1967,25 @@ Your implementation looks structurally sound and follows the architecture we dis
 
 ## **Final Verification Checklist**
 
-1. **Type Safety**  
+1. **Type Safety**
    - Run MyPy on the entire codebase
    - Add `# type: ignore` comments only where absolutely necessary
 
-2. **Immutable Core**  
+2. **Immutable Core**
    - All dataclasses are `frozen=True`
    - No mutable default arguments
 
-3. **Documentation**  
+3. **Documentation**
    - Add module-level docstrings
    - Include example usage in key classes
 
-4. **Test Coverage**  
+4. **Test Coverage**
    Basic tests should verify:
    ```python
    def test_circular_reference_protection():
        # Ensure no infinite loops in type graphs
        pass
-       
+
    def test_constraint_preservation():
        # Verify constraints survive round-trip conversions
        pass
@@ -2024,7 +2024,7 @@ class NoConversionPathError(ConversionError):
 class ConstraintViolationError(ConversionError):
     """Raised when a value fails constraint validation."""
     __slots__ = ()
-    
+
 class RegistrationError(PolitipoError):
     """Raised when plugin registration fails."""
     __slots__ = ()
@@ -2041,14 +2041,14 @@ from abc import abstractmethod
 class TypeSystem(Protocol):
     """Protocol for type system plugins."""
     __slots__ = ()  # Immutable protocol
-    
+
     @property
     @abstractmethod
     def name(self) -> str:
         """Unique identifier for the type system (e.g., 'pydantic')."""
         ...
 
-    @abstractmethod 
+    @abstractmethod
     def to_canonical(self, type_obj: Any) -> "CanonicalType":
         """Convert native type to canonical representation."""
         ...
@@ -2058,7 +2058,7 @@ class TypeSystem(Protocol):
         """Reconstruct native type from canonical representation."""
         ...
 
-    @abstractmethod 
+    @abstractmethod
     def detect(self, obj: Any) -> bool:
         """Check if object belongs to this type system."""
         ...
@@ -2067,7 +2067,7 @@ class TypeSystem(Protocol):
 class ConstraintProtocol(Protocol):
     """Protocol for constraint implementations."""
     __slots__ = ()
-    
+
     def validate(self, value: Any) -> bool: ...
     def to_dict(self) -> Dict[str, Any]: ...
     @classmethod
@@ -2144,10 +2144,10 @@ class CanonicalType:
     def _validate(self):
         if self.kind not in VALID_KINDS:
             raise ValueError(f"Invalid kind: {self.kind}. Must be one of {VALID_KINDS}")
-        
+
         if self.kind == "container" and "item_type" not in self.params:
             raise ValueError("Container types must specify 'item_type'")
-        
+
         if self.kind == "generic" and not self.params.get("type_params"):
             raise ValueError("Generic types require type_params")
 
@@ -2155,7 +2155,7 @@ class CanonicalType:
         """Returns a new instance with added constraint."""
         if not isinstance(constraint, Constraint):
             raise TypeError("Constraints must implement Constraint protocol")
-            
+
         return CanonicalType(
             kind=self.kind,
             name=self.name,
@@ -2204,11 +2204,11 @@ class ConversionEngine:
             source_system = self._detect_source_system(value)
             target_system = self._resolve_target_system(target)
             path = self._graph.find_path(source_system, target_system, value)
-            
+
             current = value
             for strategy_name in path:
                 current = self._strategies[strategy_name].convert(current)
-                
+
             return current
         except KeyError as e:
             raise NoConversionPathError(
@@ -2244,7 +2244,7 @@ class TypeGraph:
         if source not in self._adjacency:
             self._adjacency[source] = {}
         self._adjacency[source][target] = strategy
-        
+
         if target not in self._reverse_adjacency:
             self._reverse_adjacency[target] = set()
         self._reverse_adjacency[target].add(source)
@@ -2253,20 +2253,20 @@ class TypeGraph:
         """BFS with cycle detection."""
         visited = set()
         queue: Deque[tuple[str, List[str]]] = deque([(source, [])])
-        
+
         while queue:
             current, path = queue.popleft()
-            
+
             if current == target:
                 return path
-                
+
             if current in visited:
                 continue
             visited.add(current)
-            
+
             for neighbor, strategy in self._adjacency.get(current, {}).items():
                 queue.append((neighbor, path + [strategy]))
-                
+
         raise NoConversionPathError(f"No path from {source} to {target}")
 ```
 
@@ -2282,34 +2282,34 @@ First, let's create the error hierarchy:
 ---
 
 ```diff
-- 
+-
 + """
 + Core exception hierarchy for Politipo type conversion system.
 + """
-+ 
++
 + class PolitipoError(Exception):
 +     """Base exception for all Politipo-related errors."""
 +     __slots__ = ()  # Prevent attribute assignment
-+ 
-+ 
++
++
 + class ConversionError(PolitipoError):
 +     """Base class for conversion failures."""
 +     __slots__ = ()
-+ 
-+ 
++
++
 + class NoConversionPathError(ConversionError):
 +     """Raised when no conversion path exists between type systems."""
 +     __slots__ = ()
-+ 
-+ 
++
++
 + class ConstraintViolationError(ConversionError):
 +     """Raised when a value fails constraint validation."""
 +     __slots__ = ()
-+ 
-+ 
++
++
 + class RegistrationError(PolitipoError):
 +     """Raised when plugin registration fails."""
-+     __slots__ = () 
++     __slots__ = ()
 ```
 
 ---
@@ -2322,101 +2322,101 @@ Now, let's enhance the protocols with slots and better type safety:
   class TypeSystem(Protocol):
       """Protocol that all type system plugins must implement."""
 +     __slots__ = ()  # Prevent dynamic attribute creation
-      
+
       @property
       @abstractmethod
       def to_canonical(self, type_obj: Any) -> "CanonicalType":
 -         """Converts a native type to CanonicalType."""
 +         """
 +         Converts a native type to CanonicalType.
-+         
++
 +         Args:
 +             type_obj: The native type object to convert
-+             
++
 +         Returns:
 +             Canonical representation of the type
-+             
++
 +         Raises:
 +             ConversionError: If conversion fails
 +         """
           pass
-  
+
       @abstractmethod
       def from_canonical(self, canonical: "CanonicalType") -> Any:
 -         """Reconstructs a native type from CanonicalType."""
 +         """
 +         Reconstructs a native type from CanonicalType.
-+         
++
 +         Args:
 +             canonical: The canonical type to convert from
-+             
++
 +         Returns:
 +             Native type representation
-+             
++
 +         Raises:
 +             ConversionError: If conversion fails
 +         """
           pass
-  
+
       @abstractmethod
       def detect(self, obj: Any) -> bool:
 -         """Returns True if the object belongs to this type system."""
 +         """
 +         Returns True if the object belongs to this type system.
-+         
++
 +         Args:
 +             obj: Object to check
-+             
++
 +         Returns:
 +             True if this type system can handle the object
 +         """
           pass
-  
+
   class ConstraintProtocol(Protocol):
       """Protocol for constraint implementations."""
 -     def validate(self, value: Any) -> bool: ...
--     def to_dict(self) -> Dict[str, Any]: ... 
+-     def to_dict(self) -> Dict[str, Any]: ...
 +     __slots__ = ()
-+ 
++
 +     def validate(self, value: Any) -> bool:
 +         """
 +         Validate a value against this constraint.
-+         
++
 +         Args:
 +             value: Value to validate
-+             
++
 +         Returns:
 +             True if value satisfies the constraint
-+             
++
 +         Raises:
 +             ConstraintViolationError: If validation fails with details
 +         """
 +         ...
-+ 
++
 +     def to_dict(self) -> Dict[str, Any]:
 +         """
 +         Serialize constraint to dictionary.
-+         
++
 +         Returns:
 +             Dictionary representation of the constraint
 +         """
 +         ...
-+ 
++
 +     @classmethod
 +     def from_dict(cls, data: Dict[str, Any]) -> "ConstraintProtocol":
 +         """
 +         Create constraint from dictionary.
-+         
++
 +         Args:
 +             data: Dictionary representation
-+             
++
 +         Returns:
 +             New constraint instance
-+             
++
 +         Raises:
 +             ValueError: If data is invalid
 +         """
-+         ... 
++         ...
 ```
 
 ---
@@ -2431,30 +2431,30 @@ Let's enhance the constraints implementation with better validation:
 - from .abstract import Constraint
 + from typing import Any, Dict, Type
 + from ..errors import ConstraintViolationError
-  
-  
+
+
   @dataclass(frozen=True)
 - class MinValue(Constraint):
 + class MinValue:
       """Numeric minimum constraint."""
       value: float
-  
+
 +     def __post_init__(self):
 +         """Validate value type during initialization."""
 +         if not isinstance(self.value, (int, float)):
 +             raise TypeError("MinValue requires numeric value")
-+ 
++
       def validate(self, val: Any) -> bool:
 -         return float(val) >= self.value
 +         """
 +         Validate that a value meets the minimum constraint.
-+         
++
 +         Args:
 +             val: Value to validate
-+             
++
 +         Returns:
 +             True if value meets constraint
-+             
++
 +         Raises:
 +             ConstraintViolationError: If value is invalid or too small
 +         """
@@ -2469,43 +2469,43 @@ Let's enhance the constraints implementation with better validation:
 +             raise ConstraintViolationError(
 +                 f"Invalid numeric value: {val}"
 +             ) from e
-  
+
       def to_dict(self) -> Dict[str, Any]:
 +         """Serialize constraint to dictionary."""
           return {"type": "min_value", "value": self.value}
-  
+
       @classmethod
       def from_dict(cls, data: Dict[str, Any]) -> "MinValue":
 +         """Create constraint from dictionary."""
 +         if "value" not in data:
 +             raise ValueError("MinValue requires 'value' parameter")
           return cls(value=data["value"])
-  
-  
+
+
   @dataclass(frozen=True)
 - class MaxLength(Constraint):
 + class MaxLength:
       """String/collection maximum length constraint."""
       value: int
-  
+
 +     def __post_init__(self):
 +         """Validate value during initialization."""
 +         if not isinstance(self.value, int):
 +             raise TypeError("MaxLength requires integer value")
 +         if self.value < 0:
 +             raise ValueError("MaxLength must be non-negative")
-+ 
++
       def validate(self, val: Any) -> bool:
 -         return len(val) <= self.value
 +         """
 +         Validate that a value meets the length constraint.
-+         
++
 +         Args:
 +             val: Value to validate
-+             
++
 +         Returns:
 +             True if value meets constraint
-+             
++
 +         Raises:
 +             ConstraintViolationError: If value is invalid or too long
 +         """
@@ -2519,19 +2519,19 @@ Let's enhance the constraints implementation with better validation:
 +             raise ConstraintViolationError(
 +                 f"Value {val} does not support length checking"
 +             ) from e
-  
+
       def to_dict(self) -> Dict[str, Any]:
 +         """Serialize constraint to dictionary."""
           return {"type": "max_length", "value": self.value}
-  
+
       @classmethod
       def from_dict(cls, data: Dict[str, Any]) -> "MaxLength":
 +         """Create constraint from dictionary."""
 +         if "value" not in data:
 +             raise ValueError("MaxLength requires 'value' parameter")
           return cls(value=data["value"])
-  
-  
+
+
 - # Registry for deserialization
 - _CONSTRAINT_REGISTRY = {
 + # Registry for constraint deserialization with type safety
@@ -2539,21 +2539,21 @@ Let's enhance the constraints implementation with better validation:
       "min_value": MinValue,
       "max_length": MaxLength
   }
-  
-  
+
+
 - def constraint_from_dict(data: Dict[str, Any]) -> Constraint:
 -     """Factory method for deserializing constraints."""
--     return _CONSTRAINT_REGISTRY[data["type"]].from_dict(data) 
+-     return _CONSTRAINT_REGISTRY[data["type"]].from_dict(data)
 + def constraint_from_dict(data: Dict[str, Any]) -> Any:
 +     """
 +     Factory method for deserializing constraints.
-+     
++
 +     Args:
 +         data: Dictionary representation of constraint
-+         
++
 +     Returns:
 +         Instantiated constraint
-+         
++
 +     Raises:
 +         ValueError: If constraint type is unknown or data is invalid
 +     """
@@ -2563,7 +2563,7 @@ Let's enhance the constraints implementation with better validation:
 +             raise ValueError(f"Unknown constraint type: {constraint_type}")
 +         return _CONSTRAINT_REGISTRY[constraint_type].from_dict(data)
 +     except KeyError as e:
-+         raise ValueError("Constraint data must include 'type' field") from e 
++         raise ValueError("Constraint data must include 'type' field") from e
 ```
 
 ---
@@ -2579,19 +2579,19 @@ Now let's update the main.py to use these improved components:
 + from politipo.core.errors import PolitipoError
 + from pydantic import BaseModel, Field
   import pandas as pd
-  
+
 + def main():
 +     try:
           # Initialize engine
           engine = ConversionEngine()
           pandas_system = PandasTypeSystem()
           pydantic_system = PydanticTypeSystem()
-+         
++
 +         # Register type systems
           engine.register_type_system(pandas_system)
           engine.register_type_system(pydantic_system)
           )
-  
+
 - # Define a Pydantic model
 +         # Define a Pydantic model with constraints
           class User(BaseModel):
@@ -2599,7 +2599,7 @@ Now let's update the main.py to use these improved components:
 -     age: int
 +             name: str = Field(..., min_length=1, max_length=50)
 +             age: int = Field(..., ge=0, le=150)
-  
+
 - # Create a DataFrame
 +         # Create a DataFrame with test data
           df = pd.DataFrame({
@@ -2608,19 +2608,19 @@ Now let's update the main.py to use these improved components:
 +             "name": ["Alice", "Bob", ""],  # Empty name to test constraint
 +             "age": [30, 25, 200]  # Invalid age to test constraint
           })
-  
+
 - # Convert DataFrame to list of User models
 +         print("Converting DataFrame to User models...")
 +         print("Input DataFrame:")
 +         print(df)
 +         print("\nAttempting conversion...")
-+ 
++
           # First convert the DataFrame to a list of dictionaries
           df_dicts = df.to_dict('records')
-  
+
 - # Create a list of User models
 - users = [User(**user_dict) for user_dict in df_dicts]
-- 
+-
 - # Print results
 - for user in users:
 -     print(f"User: {user.name}, Age: {user.age}")
@@ -2635,12 +2635,12 @@ Now let's update the main.py to use these improved components:
 +                 print(f"Conversion error: {e}")
 +             except Exception as e:
 +                 print(f"Unexpected error: {e}")
-+ 
++
 +     except PolitipoError as e:
 +         print(f"Politipo error: {e}")
 +     except Exception as e:
 +         print(f"Unexpected error: {e}")
-+ 
++
 + if __name__ == "__main__":
 +     main()
 ```
@@ -2701,13 +2701,13 @@ def _py_type_to_canonical(self, py_type: Type) -> CanonicalType:
     # Handle Pydantic models recursively
     if isinstance(py_type, type) and issubclass(py_type, BaseModel):
         return self.to_canonical(py_type)
-    
+
     # Handle Optional[T]
     if get_origin(py_type) is Union:
         args = get_args(py_type)
         if type(None) in args:  # Optional[T]
             return self._py_type_to_canonical(next(t for t in args if t is not type(None)))
-    
+
     # Handle List[Model], Dict[str, Model], etc.
     origin = get_origin(py_type)
     if origin in (list, set, tuple, dict):
@@ -2726,7 +2726,7 @@ def _py_type_to_canonical(self, py_type: Type) -> CanonicalType:
             name=origin.__name__,
             params={"item_type": self._py_type_to_canonical(args[0])}
         )
-    
+
     # Primitive types
     type_map = {
         str: ("primitive", "str"),
@@ -2737,7 +2737,7 @@ def _py_type_to_canonical(self, py_type: Type) -> CanonicalType:
     if py_type in type_map:
         kind, name = type_map[py_type]
         return CanonicalType(kind=kind, name=name)
-    
+
     return CanonicalType(kind="primitive", name="any")
 ```
 
@@ -2752,7 +2752,7 @@ def _dtype_to_canonical(self, dtype: np.dtype) -> CanonicalType:
     if pd.api.types.is_integer_dtype(dtype):
         return CanonicalType("primitive", "int")
     elif pd.api.types.is_float_dtype(dtype):
-        return CanonicalType("primitive", "float") 
+        return CanonicalType("primitive", "float")
     elif pd.api.types.is_bool_dtype(dtype):
         return CanonicalType("primitive", "bool")
     elif pd.api.types.is_datetime64_dtype(dtype):
@@ -2807,7 +2807,7 @@ class ConversionEngine:
         cache_key = self._generate_cache_key(value, target)
         if cache_key in self._conversion_cache:
             return self._conversion_cache[cache_key]
-        
+
         result = self._perform_conversion(value, target, strict)
         self._conversion_cache[cache_key] = result
         return result
@@ -2829,11 +2829,11 @@ class DataFrameToModelStrategy(ConversionStrategy):
         model_type = context.target_type_system.from_canonical(context.target)
         results = []
         errors = []
-        
+
         for idx, row in df.iterrows():
             try:
                 data = {
-                    k: None if pd.isna(v) else v 
+                    k: None if pd.isna(v) else v
                     for k, v in row.items()
                     if k in model_type.model_fields
                 }
@@ -2842,13 +2842,13 @@ class DataFrameToModelStrategy(ConversionStrategy):
                 if context.strict:
                     raise
                 errors.append((idx, str(e)))
-                
+
         if errors and context.strict:
             raise ValueError(
                 f"{len(errors)} rows failed validation:\n" +
                 "\n".join(f"Row {idx}: {msg}" for idx, msg in errors)
             )
-            
+
         return results
 
     @lru_cache(maxsize=1024)
@@ -2898,14 +2898,14 @@ I'll help you implement these improvements. Let's start with enhancing the Pydan
 + from typing import Any, Dict, Type, Union, get_origin, get_args
   from pydantic import BaseModel, Field, create_model
   from politipo.core.types import TypeSystem, CanonicalType
-  
-  
+
+
   class PydanticTypeSystem(TypeSystem):
 -     """Type system implementation for Pydantic models."""
 +     """Type system implementation for Pydantic models with nested model support."""
-      
+
       name = "pydantic"
-  
+
       def _py_type_to_canonical(self, py_type: Type) -> CanonicalType:
 -         """Convert Python type to canonical type."""
 -         # Basic types
@@ -2914,7 +2914,7 @@ I'll help you implement these improvements. Let's start with enhancing the Pydan
 -                 kind="primitive",
 -                 name=py_type.__name__
 -             )
--             
+-
 -         # Container types
 -         if hasattr(py_type, "__origin__"):
 -             origin = py_type.__origin__
@@ -2922,17 +2922,17 @@ I'll help you implement these improvements. Let's start with enhancing the Pydan
 -                 item_type = self._py_type_to_canonical(py_type.__args__[0])
 +         """
 +         Handle nested models and generic containers.
-+         
++
 +         Args:
 +             py_type: Python type to convert
-+             
++
 +         Returns:
 +             Canonical type representation
 +         """
 +         # Handle Pydantic models recursively
 +         if isinstance(py_type, type) and issubclass(py_type, BaseModel):
 +             return self.to_canonical(py_type)
-+         
++
 +         # Handle Optional[T]
 +         if get_origin(py_type) is Union:
 +             args = get_args(py_type)
@@ -2940,7 +2940,7 @@ I'll help you implement these improvements. Let's start with enhancing the Pydan
 +                 return self._py_type_to_canonical(
 +                     next(t for t in args if t is not type(None))
 +                 )
-+         
++
 +         # Handle List[Model], Dict[str, Model], etc.
 +         origin = get_origin(py_type)
 +         if origin in (list, set, tuple, dict):
@@ -2956,7 +2956,7 @@ I'll help you implement these improvements. Let's start with enhancing the Pydan
 +                         "value_type": self._py_type_to_canonical(args[1])
 +                     }
                   )
--                 
+-
 -         # Default to Any
               return CanonicalType(
 -             kind="primitive",
@@ -2966,7 +2966,7 @@ I'll help you implement these improvements. Let's start with enhancing the Pydan
 +                 name=origin.__name__,
 +                 params={"item_type": self._py_type_to_canonical(args[0])}
 +             )
-+         
++
 +         # Primitive types
 +         type_map = {
 +             str: ("primitive", "str"),
@@ -2977,9 +2977,9 @@ I'll help you implement these improvements. Let's start with enhancing the Pydan
 +         if py_type in type_map:
 +             kind, name = type_map[py_type]
 +             return CanonicalType(kind=kind, name=name)
-+         
++
 +         return CanonicalType(kind="primitive", name="any")
-  
+
       def _canonical_to_py_type(self, canonical: CanonicalType) -> Type:
                   "list": list,
                   "set": set,
@@ -3018,4 +3018,3 @@ Cancelled
 
 
 ---
-

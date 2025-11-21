@@ -527,7 +527,7 @@ I'll create the four Python files for SQLAlchemy integration strategies in the p
 
 <details>
             <summary>Listed current directory • **33** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `.git` |
@@ -570,7 +570,7 @@ I'll create the four Python files for SQLAlchemy integration strategies in the p
 
 <details>
             <summary>Listed directory politipo • **8** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `__pycache__` |
@@ -588,7 +588,7 @@ I'll create the four Python files for SQLAlchemy integration strategies in the p
 
 <details>
             <summary>Listed directory politipo/core • **5** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `conversion` |
@@ -603,7 +603,7 @@ I'll create the four Python files for SQLAlchemy integration strategies in the p
 
 <details>
             <summary>Listed directory politipo/core/conversion • **8** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `utils` |
@@ -621,7 +621,7 @@ I'll create the four Python files for SQLAlchemy integration strategies in the p
 
 <details>
             <summary>Listed directory politipo/core/conversion/strategies • **10** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `__pycache__` |
@@ -653,7 +653,7 @@ Read file: politipo/core/conversion/context.py
 
 <details>
             <summary>Listed directory politipo/core/conversion/utils • **3** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `__pycache__` |
@@ -699,16 +699,16 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 ---
 
 ```diff
-- 
+-
 + # politipo/core/conversion/strategies/sqlalchemy_model_to_dict.py
-+ 
++
 + from typing import Any, Dict
-+ 
++
 + from politipo.core.types import CanonicalType
 + from politipo.core.conversion.context import ConversionContext
 + from politipo.core.conversion.strategies.base import ConversionStrategy
 + from politipo.core.errors import ConversionError, PolitipoError
-+ 
++
 + # Attempt to import SQLAlchemy components, required for type checking and logic
 + try:
 +     from sqlalchemy.orm.attributes import instance_state
@@ -717,11 +717,11 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +     _SQLA_AVAILABLE = False
 +     # Define dummy for type hinting if needed, though runtime checks handle absence
 +     instance_state = None
-+ 
-+ 
++
++
 + class SQLAlchemyModelToDictStrategy(ConversionStrategy):
 +     """Strategy for converting SQLAlchemy model instances to dictionaries."""
-+ 
++
 +     def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 +         """
 +         Returns True if the source is a SQLAlchemy model and the target is a dict.
@@ -734,18 +734,18 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +             target.kind == "container" and
 +             target.name == "dict"
 +         )
-+ 
++
 +     def convert(self, value: Any, context: ConversionContext) -> Dict[str, Any]:
 +         """
 +         Convert an SQLAlchemy model instance to a dictionary.
-+ 
++
 +         Args:
 +             value: The SQLAlchemy model instance to convert.
 +             context: The conversion context.
-+ 
++
 +         Returns:
 +             A dictionary representing the model's column data.
-+ 
++
 +         Raises:
 +             ConversionError: If the input is not a valid SQLAlchemy model instance
 +                              or if conversion fails.
@@ -753,7 +753,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +         """
 +         if not _SQLA_AVAILABLE:
 +             raise PolitipoError("SQLAlchemy is required for SQLAlchemyModelToDictStrategy")
-+ 
++
 +         # Basic check: Does it look like an SQLAlchemy model instance?
 +         # A more robust check might involve checking instance_state
 +         if not hasattr(value, '__table__') or not hasattr(value, '__class__'):
@@ -764,11 +764,11 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                      raise AttributeError # Not an instrumented instance
 +              except (AttributeError, TypeError):
 +                  raise ConversionError(f"Expected an SQLAlchemy model instance, got {type(value)}")
-+ 
++
 +         try:
 +             # Extract column names from the model's table definition
 +             column_names = [c.name for c in value.__table__.columns]
-+ 
++
 +             # Build the dictionary using getattr
 +             data_dict = {}
 +             for col_name in column_names:
@@ -780,27 +780,27 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                 except AttributeError:
 +                     # This shouldn't typically happen for mapped columns, but handle defensively
 +                     data_dict[col_name] = None # Or raise an error? Default to None for safety.
-+ 
++
 +             return data_dict
 +         except AttributeError as e:
 +              # Catch errors like value.__table__ not existing if the initial check failed
 +             raise ConversionError(f"Failed to access SQLAlchemy model properties: {e}") from e
 +         except Exception as e:
 +             # Catch other potential errors during attribute access or processing
-+             raise ConversionError(f"Failed to convert SQLAlchemy model instance to dict: {e}") from e 
++             raise ConversionError(f"Failed to convert SQLAlchemy model instance to dict: {e}") from e
 ```
 
 ---
 
 ```diff
-- 
+-
 + from typing import Any, Dict, Type
-+ 
++
 + from politipo.core.types import CanonicalType
 + from politipo.core.conversion.context import ConversionContext
 + from politipo.core.conversion.strategies.base import ConversionStrategy
 + from politipo.core.errors import ConversionError, PolitipoError
-+ 
++
 + # Attempt to import SQLAlchemy components
 + try:
 +     from sqlalchemy.orm import DeclarativeMeta
@@ -808,11 +808,11 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 + except ImportError:
 +     _SQLA_AVAILABLE = False
 +     DeclarativeMeta = None
-+ 
-+ 
++
++
 + class DictToSQLAlchemyModelStrategy(ConversionStrategy):
 +     """Strategy for converting dictionaries to SQLAlchemy model instances."""
-+ 
++
 +     def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 +         """
 +         Returns True if the source is a dict and the target is a SQLAlchemy model.
@@ -825,18 +825,18 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +             target.meta is not None and
 +             target.meta.get("origin_system") == "sqlalchemy_model"
 +         )
-+ 
++
 +     def convert(self, value: Any, context: ConversionContext) -> Any:
 +         """
 +         Convert a dictionary to an SQLAlchemy model instance.
-+ 
++
 +         Args:
 +             value: The dictionary to convert.
 +             context: The conversion context containing target type information.
-+ 
++
 +         Returns:
 +             An instance of the target SQLAlchemy model.
-+ 
++
 +         Raises:
 +             ConversionError: If the input is not a dict, the target type system
 +                              is missing, the target model class cannot be resolved,
@@ -845,14 +845,14 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +         """
 +         if not _SQLA_AVAILABLE:
 +             raise PolitipoError("SQLAlchemy is required for DictToSQLAlchemyModelStrategy")
-+ 
++
 +         if not isinstance(value, dict):
 +             raise ConversionError(f"Expected dict, got {type(value)}")
-+ 
++
 +         # Get the target SQLAlchemy model class from the context
 +         if not context.target_type_system:
 +             raise ConversionError("Target type system (SQLAlchemyModelTypeSystem) not found in context")
-+ 
++
 +         try:
 +             # Use the target system to reconstruct the model class from the canonical type
 +             model_class: Type = context.target_type_system.from_canonical(context.target)
@@ -860,12 +860,12 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                  # Check if it's a DeclarativeMeta type
 +                  if not isinstance(getattr(model_class, '__class__', None), DeclarativeMeta):
 +                       raise ConversionError(f"Target system did not return a valid SQLAlchemy model class for {context.target.name}")
-+ 
++
 +         except NotImplementedError:
 +             raise ConversionError(f"Target system '{context.target_type_system.name}' cannot reconstruct model from canonical type.")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to get target SQLAlchemy model class from canonical type: {e}") from e
-+ 
++
 +         # Instantiate the model
 +         try:
 +             # Filter dict keys based on model columns if not in strict mode
@@ -873,7 +873,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +             if not context.strict:
 +                 valid_column_names = {c.name for c in model_class.__table__.columns}
 +                 data_to_instantiate = {k: v for k, v in value.items() if k in valid_column_names}
-+ 
++
 +             # Instantiate using **kwargs
 +             # Note: This assumes the dictionary keys match model attribute names.
 +             # Complex relationships or non-column attributes might require custom handling
@@ -892,23 +892,23 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                       raise ConversionError(f"Failed to instantiate {model_class.__name__} even in non-strict mode: {final_e}") from final_e
 +         except Exception as e:
 +             # Catch other potential instantiation errors
-+             raise ConversionError(f"Failed to create SQLAlchemy model instance of {model_class.__name__}: {e}") from e 
++             raise ConversionError(f"Failed to create SQLAlchemy model instance of {model_class.__name__}: {e}") from e
 ```
 
 ---
 
 ```diff
-- 
+-
 + # politipo/core/conversion/strategies/model_to_sqlalchemy_model.py
-+ 
++
 + from typing import Any, Dict, Type
-+ 
++
 + from politipo.core.types import CanonicalType
 + from politipo.core.conversion.context import ConversionContext
 + from politipo.core.conversion.strategies.base import ConversionStrategy
 + from politipo.core.errors import ConversionError, PolitipoError
 + from politipo.core.utils.pydantic import get_pydantic_version # To check for model_dump/dict
-+ 
++
 + # Attempt to import SQLAlchemy components
 + try:
 +     from sqlalchemy.orm import DeclarativeMeta
@@ -916,7 +916,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 + except ImportError:
 +     _SQLA_AVAILABLE = False
 +     DeclarativeMeta = None
-+ 
++
 + # Attempt to import Pydantic components
 + try:
 +     from pydantic import BaseModel
@@ -924,14 +924,14 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 + except ImportError:
 +     _PYDANTIC_AVAILABLE = False
 +     BaseModel = None
-+ 
-+ 
++
++
 + class ModelToSQLAlchemyModelStrategy(ConversionStrategy):
 +     """
 +     Strategy for converting Pydantic/SQLModel instances to SQLAlchemy model instances.
 +     Internally converts the source model to a dictionary first.
 +     """
-+ 
++
 +     def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 +         """
 +         Returns True if source is Pydantic/SQLModel and target is SQLAlchemy model.
@@ -944,18 +944,18 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +             target.meta is not None and
 +             target.meta.get("origin_system") == "sqlalchemy_model"
 +         )
-+ 
++
 +     def convert(self, value: Any, context: ConversionContext) -> Any:
 +         """
 +         Convert a Pydantic/SQLModel instance to an SQLAlchemy model instance.
-+ 
++
 +         Args:
 +             value: The Pydantic or SQLModel instance.
 +             context: The conversion context.
-+ 
++
 +         Returns:
 +             An instance of the target SQLAlchemy model.
-+ 
++
 +         Raises:
 +             ConversionError: If conversion fails at any step.
 +             PolitipoError: If SQLAlchemy or Pydantic is not installed.
@@ -971,8 +971,8 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +              elif context.source.meta and context.source.meta.get("origin_system") == "pydantic":
 +                  raise PolitipoError("Pydantic is required for ModelToSQLAlchemyModelStrategy")
 +              # If source system unknown or different, let it proceed, maybe it has .dict() anyway
-+ 
-+ 
++
++
 +         # 1. Convert Source Model (Pydantic/SQLModel) to Dictionary
 +         try:
 +             if hasattr(value, "model_dump"):  # Pydantic v2 preferred
@@ -983,7 +983,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                 raise ConversionError(f"Source object {type(value)} does not have 'model_dump' or 'dict' method.")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to convert source model {type(value).__name__} to dict: {e}") from e
-+ 
++
 +         # 2. Get Target SQLAlchemy Model Class
 +         if not context.target_type_system:
 +             raise ConversionError("Target type system (SQLAlchemyModelTypeSystem) not found in context")
@@ -995,7 +995,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                       raise ConversionError(f"Target system did not return a valid SQLAlchemy model class for {context.target.name}")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to get target SQLAlchemy model class: {e}") from e
-+ 
++
 +         # 3. Instantiate SQLAlchemy Model from Dictionary
 +         try:
 +             # Filter dict keys based on model columns if not in strict mode
@@ -1003,7 +1003,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +             if not context.strict:
 +                 valid_column_names = {c.name for c in model_class.__table__.columns}
 +                 data_to_instantiate = {k: v for k, v in data_dict.items() if k in valid_column_names}
-+ 
++
 +             instance = model_class(**data_to_instantiate)
 +             return instance
 +         except TypeError as e:
@@ -1016,23 +1016,23 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                  except Exception as final_e:
 +                      raise ConversionError(f"Failed to instantiate {model_class.__name__} even in non-strict mode: {final_e}") from final_e
 +         except Exception as e:
-+             raise ConversionError(f"Failed to create SQLAlchemy model instance {model_class.__name__} from dict: {e}") from e 
++             raise ConversionError(f"Failed to create SQLAlchemy model instance {model_class.__name__} from dict: {e}") from e
 ```
 
 ---
 
 ```diff
-- 
+-
 + # politipo/core/conversion/strategies/sqlalchemy_model_to_model.py
-+ 
++
 + from typing import Any, Dict, Type
-+ 
++
 + from politipo.core.types import CanonicalType
 + from politipo.core.conversion.context import ConversionContext
 + from politipo.core.conversion.strategies.base import ConversionStrategy
 + from politipo.core.errors import ConversionError, PolitipoError
 + from politipo.core.conversion.utils.instantiation import create_model_instance_from_dict # Helper for Pydantic/SQLModel
-+ 
++
 + # Attempt to import SQLAlchemy components
 + try:
 +     from sqlalchemy.orm.attributes import instance_state
@@ -1040,7 +1040,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 + except ImportError:
 +     _SQLA_AVAILABLE = False
 +     instance_state = None
-+ 
++
 + # Attempt to import Pydantic components
 + try:
 +     from pydantic import BaseModel
@@ -1048,14 +1048,14 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 + except ImportError:
 +     _PYDANTIC_AVAILABLE = False
 +     BaseModel = None
-+ 
-+ 
++
++
 + class SQLAlchemyModelToModelStrategy(ConversionStrategy):
 +     """
 +     Strategy for converting SQLAlchemy model instances to Pydantic/SQLModel instances.
 +     Internally converts the SQLAlchemy model to a dictionary first.
 +     """
-+ 
++
 +     def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 +         """
 +         Returns True if source is SQLAlchemy model and target is Pydantic/SQLModel.
@@ -1068,18 +1068,18 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +             target.meta is not None and
 +             target.meta.get("origin_system") in ("pydantic", "sqlmodel")
 +         )
-+ 
++
 +     def convert(self, value: Any, context: ConversionContext) -> Any:
 +         """
 +         Convert an SQLAlchemy model instance to a Pydantic/SQLModel instance.
-+ 
++
 +         Args:
 +             value: The SQLAlchemy model instance.
 +             context: The conversion context.
-+ 
++
 +         Returns:
 +             An instance of the target Pydantic or SQLModel model.
-+ 
++
 +         Raises:
 +             ConversionError: If conversion fails at any step.
 +             PolitipoError: If SQLAlchemy or Pydantic is not installed.
@@ -1095,8 +1095,8 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +              elif context.target.meta and context.target.meta.get("origin_system") == "pydantic":
 +                  raise PolitipoError("Pydantic is required for SQLAlchemyModelToModelStrategy")
 +              # If target system unknown or different, this strategy shouldn't have been selected anyway
-+ 
-+ 
++
++
 +         # 1. Convert SQLAlchemy Model to Dictionary
 +         try:
 +             # Basic check for SQLAlchemy instance
@@ -1106,12 +1106,12 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                       if not state: raise AttributeError
 +                  except (AttributeError, TypeError):
 +                       raise ConversionError(f"Expected an SQLAlchemy model instance, got {type(value)}")
-+ 
++
 +             column_names = [c.name for c in value.__table__.columns]
 +             data_dict = {col: getattr(value, col) for col in column_names}
 +         except Exception as e:
 +             raise ConversionError(f"Failed to convert SQLAlchemy model {type(value).__name__} to dict: {e}") from e
-+ 
++
 +         # 2. Get Target Pydantic/SQLModel Class
 +         if not context.target_type_system:
 +             raise ConversionError("Target type system (PydanticTypeSystem or SQLModelTypeSystem) not found in context")
@@ -1125,7 +1125,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +                       raise ConversionError(f"Target system did not return a valid Pydantic/SQLModel class for {context.target.name}")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to get target Pydantic/SQLModel class: {e}") from e
-+ 
++
 +         # 3. Instantiate Pydantic/SQLModel from Dictionary
 +         try:
 +             # Use the utility function which handles Pydantic v1/v2 and strict mode
@@ -1133,7 +1133,7 @@ runner@0dddef2ce518:~/workspace$ mkdir -p politipo/core/conversion/strategies
 +             return instance
 +         except Exception as e:
 +             # The helper raises ConversionError, but catch just in case
-+             raise ConversionError(f"Failed to create Pydantic/SQLModel instance {model_class.__name__} from dict: {e}") from e 
++             raise ConversionError(f"Failed to create Pydantic/SQLModel instance {model_class.__name__} from dict: {e}") from e
 ```
 
 ---
@@ -1153,7 +1153,7 @@ Read file: politipo/core/conversion/strategies/__init__.py
 + from politipo.core.conversion.strategies.dict_to_sqlalchemy_model import DictToSQLAlchemyModelStrategy
 + from politipo.core.conversion.strategies.model_to_sqlalchemy_model import ModelToSQLAlchemyModelStrategy
 + from politipo.core.conversion.strategies.sqlalchemy_model_to_model import SQLAlchemyModelToModelStrategy
-  
+
   __all__ = [
       "ListToPolarsStrategy",
       "PolarsToListStrategy",
@@ -1161,14 +1161,14 @@ Read file: politipo/core/conversion/strategies/__init__.py
 +     "DictToSQLAlchemyModelStrategy",
 +     "ModelToSQLAlchemyModelStrategy",
 +     "SQLAlchemyModelToModelStrategy",
-  ] 
+  ]
 ```
 
 ---
 
 <details>
             <summary>Listed directory politipo/core/conversion/strategies • **14** results</summary>
-        
+
 | Name |
 |-------|
 | 📄 `__init__.py` |
@@ -1221,4 +1221,3 @@ engine.register_strategy(SQLAlchemyModelToModelStrategy())
 
 
 ---
-

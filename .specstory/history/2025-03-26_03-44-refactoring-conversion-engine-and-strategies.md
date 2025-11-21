@@ -282,7 +282,7 @@ First, let me check the core type system structure:
 
 <details>
             <summary>Searched codebase "class TypeSystem protocol or interface definition" • **25** results</summary>
-        
+
 | File | Lines |
 |------|-------|
 | `politipo/core/types/protocols.py` | L1-59 |
@@ -329,7 +329,7 @@ Let me try a more targeted search:
 
 <details>
             <summary>Grep search for "class CanonicalType" • **2** files</summary>
-        
+
 | File | Line | Match |
 |------|------|-------|
 | `vscode-remote://ssh-remote%2Bbb8ae998-9d3f-40f1-82c0-394f0933d18a@bb8ae998-9d3f-40f1-82c0-394f0933d18a-00-19oa4jwe6j4k1.janeway.replit.dev:22/home/runner/workspace/.specstory/history/2025-03-25_15-12-implementing-a-type-system-step-by-step.md` | L113 | `class CanonicalType:` |
@@ -357,12 +357,12 @@ Based on the codebase analysis, I'll help implement the proposed improvements to
 
 ```diff
           pass
-  
+
 +     @abstractmethod
 +     def get_default_canonical(self) -> "CanonicalType":
 +         """
 +         Returns a default/generic CanonicalType for this system.
-+         
++
 +         Returns:
 +             A CanonicalType representing the most generic/default type for this system.
 +             For example:
@@ -371,13 +371,13 @@ Based on the codebase analysis, I'll help implement the proposed improvements to
 +             - Python: Any
 +             - SQLModel: SQLModel base class
 +             - Polars: DataFrame with no columns
-+         
++
 +         This is used when the target is specified only as a string system name,
 +         without any specific type information.
 +         """
 +         pass
-+ 
-  
++
+
   @runtime_checkable
 ```
 
@@ -389,11 +389,11 @@ Now let's implement this method in each type system, starting with PythonTypeSys
 
 ```diff
       name = "python"
-  
+
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns the most generic Python type (Any)."""
 +         return CanonicalType(kind="primitive", name="any")
-+ 
++
       @lru_cache(maxsize=256)
       def to_canonical(self, type_obj: Type) -> CanonicalType:
 ```
@@ -405,14 +405,14 @@ Next, let's implement it for PydanticTypeSystem:
 ---
 
 ```diff
-  
-  
+
+
 - from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
   # Import constraint classes
           self._python_system = PythonTypeSystem()
-  
+
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns a generic dict type as the default Pydantic target."""
 +         return CanonicalType(
@@ -424,7 +424,7 @@ Next, let's implement it for PydanticTypeSystem:
 +             },
 +             meta=TypeMeta(data={"origin_system": self.name})
 +         )
-+ 
++
       @lru_cache(maxsize=128)
       def to_canonical(self, type_obj: Type[BaseModel]) -> CanonicalType:
 ```
@@ -437,13 +437,13 @@ Now for PandasTypeSystem:
 
 ```diff
   from functools import lru_cache # Added lru_cache
-  
+
 - from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError # Added error
-  
+
           return False
-  
+
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns a generic DataFrame type as the default Pandas target."""
 +         return CanonicalType(
@@ -458,7 +458,7 @@ Now for PandasTypeSystem:
 +                 "pandas_index": {"name": None, "dtype": "int64"}
 +             })
 +         )
-+ 
++
       def _dtype_to_canonical(self, dtype: np.dtype) -> CanonicalType:
           """Maps numpy/pandas dtype object to CanonicalType."""
 ```
@@ -471,13 +471,13 @@ For PolarsTypeSystem:
 
 ```diff
       pl = None # Allow type checking
-  
+
 - from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
-  
+
       name = "polars"
-  
+
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns a generic DataFrame type as the default Polars target."""
 +         return CanonicalType(
@@ -492,7 +492,7 @@ For PolarsTypeSystem:
 +                 "polars_schema": {}  # Empty schema metadata
 +             })
 +         )
-+ 
++
       def __init__(self):
           if pl is None:
 ```
@@ -505,13 +505,13 @@ Finally, for SQLModelTypeSystem:
 
 ```diff
       SQLModel = None # Allow type checking
-  
+
 - from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
   # Import Pydantic system for delegation - assumes it's registered
       name = "sqlmodel"
-  
+
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns a generic SQLModel type as the default target."""
 +         return CanonicalType(
@@ -530,7 +530,7 @@ Finally, for SQLModelTypeSystem:
 +                 "sql_relationships": {}
 +             })
 +         )
-+ 
++
       def __init__(self):
           if SQLModel is None:
 ```
@@ -551,39 +551,39 @@ Now let's update the ConversionEngine to use these new capabilities:
       ) -> Any:
           """
 -         Convert a value from one type system to another.
-- 
+-
 +         Convert a value to the target type.
-+         
++
           Args:
               value: The value to convert
 -             source: Source type system or canonical type
 -             target: Target type system or canonical type
 -             strict: Whether to enforce strict validation
-- 
+-
 +             target: Target type specification, can be:
 +                    - str: Name of target type system (e.g., "pandas")
 +                    - Type: Native type class (e.g., MyPydanticModel)
 +                    - CanonicalType: Pre-constructed canonical type
 +                    - TypeSystem: Type system instance (advanced use)
 +             strict: Whether to enforce strict type checking
-+             
++
           Returns:
               The converted value
-- 
-+             
+-
++
           Raises:
               ConversionError: If conversion fails
           """
 -         # Resolve source and target to canonical types if needed
 -         source_canonical = self._resolve_type(value, source)
 -         target_canonical = self._resolve_type(value, target)
-- 
+-
 +         # Resolve source canonical type from value's type
 +         source_canonical = self._resolve_canonical(value, None, is_source=True)
-+         
++
 +         # Resolve target canonical type from specification
 +         target_canonical = self._resolve_canonical(None, target, is_source=False)
-+         
++
           # Find appropriate strategy
           strategy = self._find_strategy(source_canonical, target_canonical)
           if not strategy:
@@ -591,7 +591,7 @@ Now let's update the ConversionEngine to use these new capabilities:
 -                 f"No conversion strategy found for {source_canonical.kind}:{source_canonical.name} -> "
 -                 f"{target_canonical.kind}:{target_canonical.name}"
 -             )
-- 
+-
 -         # Create conversion context
 -         context = ConversionContext(
 -             source=source_canonical,
@@ -600,17 +600,17 @@ Now let's update the ConversionEngine to use these new capabilities:
 -             target_type_system=self._get_type_system(target),
 -             strict=strict
 -         )
-- 
+-
 +                 f"No conversion strategy found from {source_canonical.name} to {target_canonical.name}"
 +             )
-+             
++
           # Execute conversion
 -         return strategy.convert(value, context)
 +         try:
 +             return strategy.convert(value, target_canonical, strict=strict)
 +         except Exception as e:
 +             raise ConversionError(f"Conversion failed: {e}") from e
-  
+
 -     def _resolve_type(self, value: Any, type_spec: Union[CanonicalType, TypeSystem, str]) -> CanonicalType:
 -         """Resolve type specification to canonical type."""
 +     def _resolve_canonical(
@@ -621,30 +621,30 @@ Now let's update the ConversionEngine to use these new capabilities:
 +     ) -> CanonicalType:
 +         """
 +         Resolve type specification to canonical type.
-+         
++
 +         Args:
 +             value_or_type: The value (for source) or type (for target)
 +             type_spec: Type specification
 +             is_source: Whether resolving source or target type
-+             
++
 +         Returns:
 +             Resolved CanonicalType
-+             
++
 +         Raises:
 +             ConversionError: If resolution fails
 +         """
           if isinstance(type_spec, CanonicalType):
               return type_spec
--         
+-
 -         type_system = self._get_type_system(type_spec)
 -         if not type_system:
 -             raise ConversionError(f"Could not resolve type system from: {type_spec}")
--             
+-
 -         return type_system.to_canonical(value)
-+ 
++
 +         system: Optional[TypeSystem] = None
 +         native_type: Optional[Type] = None
-+ 
++
 +         if isinstance(type_spec, TypeSystem):
 +             system = type_spec
 +         elif isinstance(type_spec, str):
@@ -667,7 +667,7 @@ Now let's update the ConversionEngine to use these new capabilities:
 +             native_type = value_type
 +         else:
 +             raise ConversionError(f"Invalid type specification: {type_spec}")
-+ 
++
 +         try:
 +             if is_source:
 +                 # For source, always use the actual type
@@ -681,14 +681,14 @@ Now let's update the ConversionEngine to use these new capabilities:
 +         except Exception as e:
 +             context = "source" if is_source else "target"
 +             raise ConversionError(f"Failed to resolve {context} type: {e}") from e
-+ 
++
 +     def _detect_system_for_type(self, native_type: Type) -> Optional[TypeSystem]:
 +         """Find the registered TypeSystem that detects the given native type."""
 +         for system in self._type_systems.values():
 +             if system.detect(native_type):
 +                 return system
 +         return None
-  
+
       def _get_type_system(self, type_spec: Union[CanonicalType, TypeSystem, str]) -> Optional[TypeSystem]:
 ```
 
@@ -699,30 +699,30 @@ Now let's update the ConversionStrategy interface to match the new conversion en
 ---
 
 ```diff
-- 
+-
 + from abc import ABC, abstractmethod
 + from typing import Any, Dict, Optional
-+ 
++
 + from politipo.core.types import CanonicalType
-+ 
-+ 
++
++
 + class ConversionStrategy(ABC):
 +     """Base class for all conversion strategies."""
-+ 
++
 +     @abstractmethod
 +     def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 +         """
 +         Returns True if this strategy can handle the conversion.
-+         
++
 +         Args:
 +             source: Source canonical type
 +             target: Target canonical type
-+             
++
 +         Returns:
 +             True if this strategy can handle the conversion
 +         """
 +         pass
-+ 
++
 +     @abstractmethod
 +     def convert(
 +         self,
@@ -732,28 +732,28 @@ Now let's update the ConversionStrategy interface to match the new conversion en
 +     ) -> Any:
 +         """
 +         Convert a value to the target type.
-+         
++
 +         Args:
 +             value: The value to convert
 +             target: Target canonical type
 +             strict: Whether to enforce strict type checking
-+             
++
 +         Returns:
 +             The converted value
-+             
++
 +         Raises:
 +             ConversionError: If conversion fails
 +         """
 +         pass
-+ 
++
 +     def get_priority(self) -> int:
 +         """
 +         Returns the priority of this strategy (higher = more specific).
-+         
++
 +         Default implementations should return 0.
 +         More specific implementations (e.g., direct conversions) should return higher values.
 +         """
-+         return 0 
++         return 0
 ```
 
 ---
@@ -1165,56 +1165,56 @@ I'll help you implement these tasks. Let's go through them one by one.
   from abc import ABC, abstractmethod
   from typing import Any, Dict, Optional, Protocol, runtime_checkable
 + from dataclasses import dataclass, field
-+ 
-+ 
++
++
 + @dataclass(frozen=True)
 + class SimpleTypeMeta:
 +     """Concrete implementation for storing type metadata as a dictionary."""
 +     data: Dict[str, Any] = field(default_factory=dict)
-+ 
++
 +     def merge(self, other: "SimpleTypeMeta") -> "SimpleTypeMeta":
 +         """
 +         Combines two metadata objects, with 'other' overriding.
-+         
++
 +         Args:
 +             other: The metadata to merge with this one
-+             
++
 +         Returns:
 +             A new SimpleTypeMeta with merged data
 +         """
 +         merged_data = {**self.data, **other.data}
 +         return SimpleTypeMeta(data=merged_data)
-+ 
++
 +     def get(self, key: str, default: Any = None) -> Any:
 +         """
 +         Helper method to access metadata.
-+         
++
 +         Args:
 +             key: The key to look up
 +             default: Value to return if key not found
-+             
++
 +         Returns:
 +             The value for the key or the default
 +         """
 +         return self.data.get(key, default)
-+ 
-+ 
++
++
 + # Make TypeMeta an alias for SimpleTypeMeta for potential future flexibility
 + TypeMeta = SimpleTypeMeta
-  
-  
+
+
       def from_dict(cls, data: Dict[str, Any]) -> "Constraint":
           """Deserializes a constraint."""
 -         pass
-- 
-- 
+-
+-
 - class TypeMeta(ABC):
 -     """Metadata attached to canonical types (e.g., SQL 'NOT NULL')."""
--     
+-
 -     @abstractmethod
 -     def merge(self, other: "TypeMeta") -> "TypeMeta":
 -         """Combines two metadata objects."""
-          pass 
+          pass
 ```
 
 ---
@@ -1228,13 +1228,13 @@ Now let's update the `CanonicalType` class to use `SimpleTypeMeta`:
   from typing import Literal, Dict, Any, Optional, List
 - from .abstract import Constraint, TypeMeta
 + from .abstract import Constraint, SimpleTypeMeta
-  
-  
+
+
       params: Dict[str, Any] = field(default_factory=dict)
       constraints: Dict[str, Constraint] = field(default_factory=dict)
 -     meta: Optional[TypeMeta] = None
 +     meta: Optional[SimpleTypeMeta] = None
-  
+
       def __post_init__(self):
 ```
 
@@ -1248,7 +1248,7 @@ Now let's update the Pydantic type system to use `SimpleTypeMeta` and enhance it
   import sys
   import json
 + import inspect
-  
+
   try:
           from pydantic.fields import ModelField
           _PYDANTIC_V2 = False
@@ -1263,23 +1263,23 @@ Now let's update the Pydantic type system to use `SimpleTypeMeta` and enhance it
           if type_obj is SecretStr:
                return CanonicalType(kind="primitive", name="str", params={"format": "secret"})
 -         # Add more specific Pydantic types here (UUID, Url, etc.)
-  
+
           # Handle Pydantic Model Classes
           if isinstance(type_obj, type) and issubclass(type_obj, BaseModel):
 -             fields = {}
 +             fields_canonical = {}
               model_fields_dict = {}
               required_set = set()
-  
+
               for name, field in model_fields_dict.items():
 -                 # Delegate type conversion (handles primitives, containers, nested models)
 -                 # Need field.annotation (v2) or field.outer_type_ (v1)
                   field_annotation = getattr(field, 'annotation', getattr(field, 'outer_type_', Any))
                   field_type_canonical = self._map_pydantic_annotation_to_canonical(field_annotation)
-- 
+-
 -                 # Extract constraints
                   constraints = self._extract_constraints(field)
-  
+
 -                 fields[name] = {
 +                 # Extract default value
 +                 default_value = ...  # Ellipsis represents no default set
@@ -1295,7 +1295,7 @@ Now let's update the Pydantic type system to use `SimpleTypeMeta` and enhance it
 +                        raw_default = getattr(field_info_v1, 'default', ...)
 +                        if raw_default is not ...:
 +                            default_value = raw_default
-+ 
++
 +                 fields_canonical[name] = {
                       "type": field_type_canonical,
                       "constraints": constraints,
@@ -1304,7 +1304,7 @@ Now let's update the Pydantic type system to use `SimpleTypeMeta` and enhance it
 +                     "default": default_value,
                       "description": getattr(field, 'description', None),
 +                 }
-+ 
++
 +             # Extract model config
 +             model_config_dict = {}
 +             if _PYDANTIC_V2:
@@ -1325,16 +1325,16 @@ Now let's update the Pydantic type system to use `SimpleTypeMeta` and enhance it
 +                         for key in dir(config_class)
 +                         if not key.startswith('_') and not callable(getattr(config_class, key))
 +                     }
-+ 
++
 +             # Extract model docstring for description
 +             model_description = inspect.getdoc(type_obj)
-+ 
++
 +             meta_data = {
 +                 "origin_system": self.name,
 +                 "pydantic_config": model_config_dict,
 +                 "description": model_description,
               }
-  
+
               # Store full schema for reconstruction fidelity
               try:
                   schema = type_obj.model_json_schema() if _PYDANTIC_V2 else type_obj.schema()
@@ -1346,9 +1346,9 @@ Now let's update the Pydantic type system to use `SimpleTypeMeta` and enhance it
               except Exception:
                   # Fallback if schema generation fails
 -                  params = {"fields": fields}
-- 
+-
 +                 params = {"fields": fields_canonical}
-  
+
               return CanonicalType(
                   kind="composite",
                   name=type_obj.__name__,
@@ -1356,7 +1356,7 @@ Now let's update the Pydantic type system to use `SimpleTypeMeta` and enhance it
 -                 # Model level constraints? (e.g. model validators) - skip for now
 +                 meta=TypeMeta(data=meta_data)
               )
-  
+
 ```
 
 ---
@@ -1384,12 +1384,12 @@ Let's also update the SQLModel type system to use SimpleTypeMeta and implement g
 
 ```diff
                raise ConversionError(f"Object {type_obj} is not a SQLModel class.")
-  
+
 -         # Basic approach: Treat like Pydantic for structure
 -         # This requires having access to the PydanticTypeSystem instance
 -         # For now, let's create a placeholder structure
 -         # A better way would be to look up the Pydantic system via an engine/registry
-- 
+-
 -         # Placeholder: Generate a basic composite type
           fields = {}
           try:
@@ -1405,8 +1405,8 @@ Let's also update the SQLModel type system to use SimpleTypeMeta and implement g
 -                      field_canon = CanonicalType(kind="primitive", name="any", meta={"details": "sqlmodel_field_placeholder"})
 +                      field_canon = CanonicalType(kind="primitive", name="any", meta=TypeMeta(data={"details": "sqlmodel_field_placeholder"}))
                        fields[name] = {"type": field_canon, "constraints": {}, "required": field.required}
-  
-  
+
+
           # Extract potential table name, primary key info etc. into meta
 -         meta = {"is_sqlmodel": True}
 +         meta_data = {
@@ -1417,7 +1417,7 @@ Let's also update the SQLModel type system to use SimpleTypeMeta and implement g
 -             meta['sql_tablename'] = type_obj.__tablename__
 +             meta_data['sql_tablename'] = type_obj.__tablename__
           # Add more SQL specific metadata extraction here
-  
+
           return CanonicalType(
               kind="composite",
               name=type_obj.__name__,
@@ -1426,7 +1426,7 @@ Let's also update the SQLModel type system to use SimpleTypeMeta and implement g
 +             params={"fields": fields},
 +             meta=TypeMeta(data=meta_data)
           )
-  
+
 ```
 
 ---
@@ -1445,7 +1445,7 @@ Finally, let's update the Polars type system to use SimpleTypeMeta:
 +                 params={"item_type": item_canon},
 +                 meta=TypeMeta(data={"origin_system": self.name})
 +             )
-  
+
           # Handle Struct specifically
                        field_type = field_obj.dtype
                        fields[field_name] = {"type": self.to_canonical(field_type)} # Required? Constraints?
@@ -1456,10 +1456,10 @@ Finally, let's update the Polars type system to use SimpleTypeMeta:
 +                  params={"fields": fields},
 +                  meta=TypeMeta(data={"origin_system": self.name})
 +              )
-  
+
           # Handle primitive/other types
                        if type_obj.time_unit: params['time_unit'] = type_obj.time_unit
-  
+
 -                 return CanonicalType(kind="primitive", name=canonical_name, params=params)
 +                 return CanonicalType(
 +                     kind="primitive",
@@ -1467,7 +1467,7 @@ Finally, let's update the Polars type system to use SimpleTypeMeta:
 +                     params=params,
 +                     meta=TypeMeta(data={"origin_system": self.name})
 +                 )
-  
+
           # Fallback for unknown Polars types
 -         return CanonicalType(kind="primitive", name="any", meta={"original_type": str(type_obj)})
 +         return CanonicalType(
@@ -1475,7 +1475,7 @@ Finally, let's update the Polars type system to use SimpleTypeMeta:
 +             name="any",
 +             meta=TypeMeta(data={"origin_system": self.name, "original_type": str(type_obj)})
 +         )
-  
+
       @lru_cache(maxsize=128)
 ```
 
@@ -1697,11 +1697,11 @@ I'll help fix the issues identified in the review. Let's address them one by one
 
 ```diff
   from functools import lru_cache
-  
+
 - from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError
-  
+
       def get_default_canonical(self) -> CanonicalType:
           """Returns the most generic Python type (Any)."""
 -         return CanonicalType(kind="primitive", name="any")
@@ -1710,7 +1710,7 @@ I'll help fix the issues identified in the review. Let's address them one by one
 +             name="any",
 +             meta=TypeMeta(data={"origin_system": self.name})
 +         )
-  
+
       @lru_cache(maxsize=256)
               else: # Handles plain list, tuple, etc.
                   item_type = CanonicalType(kind="primitive", name="any")
@@ -1721,7 +1721,7 @@ I'll help fix the issues identified in the review. Let's address them one by one
 +                 params={"item_type": item_type},
 +                 meta=TypeMeta(data={"origin_system": self.name})
 +             )
-  
+
           # Handle dict
                   key_type = CanonicalType(kind="primitive", name="any")
                   value_type = CanonicalType(kind="primitive", name="any")
@@ -1732,7 +1732,7 @@ I'll help fix the issues identified in the review. Let's address them one by one
 +                 params={"key_type": key_type, "value_type": value_type},
 +                 meta=TypeMeta(data={"origin_system": self.name})
 +             )
-  
+
           # Handle primitive types
           }
           if type_obj in primitive_map:
@@ -1742,7 +1742,7 @@ I'll help fix the issues identified in the review. Let's address them one by one
 +                 name=primitive_map[type_obj],
 +                 meta=TypeMeta(data={"origin_system": self.name})
 +             )
-  
+
           # Fallback for unknown types
 -         # Could attempt to get name: getattr(type_obj, '__name__', 'unknown')
 -         # Treat as 'any' for now
@@ -1755,8 +1755,8 @@ I'll help fix the issues identified in the review. Let's address them one by one
 +                 "original_type": str(type_obj)
 +             })
 +         )
-  
-  
+
+
 ```
 
 ---
@@ -1767,19 +1767,19 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 
 ```diff
       sa_types = None
-  
+
 - from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
-  
-  
+
+
   class SQLAlchemyTypeSystem(TypeSystem):
 -     """Type system implementation for SQLAlchemy column types."""
 +     """Type system implementation for SQLAlchemy types."""
-  
+
       name = "sqlalchemy"
           }
-  
+
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns a generic SQL type as the default target."""
 +         return CanonicalType(
@@ -1787,13 +1787,13 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 +             name="any",
 +             meta=TypeMeta(data={"origin_system": self.name})
 +         )
-+ 
++
       @lru_cache(maxsize=128)
 -     def to_canonical(self, type_obj: Type[sa_types.TypeEngine]) -> CanonicalType:
 -         """Converts an SQLAlchemy type to CanonicalType."""
 -         # Handle instances and classes
 -         sa_type_class = type_obj if isinstance(type_obj, type) else type(type_obj)
-- 
+-
 -         for sa_class, canonical_name in self._to_canonical_map.items():
 -             if issubclass(sa_type_class, sa_class):
 -                 params = {}
@@ -1803,22 +1803,22 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 -                      # Store as MaxLength constraint
 -                      from politipo.core.types.constraints import MaxLength
 -                      constraints[MaxLength.__name__] = MaxLength(value=type_obj.length)
-- 
+-
 -                 # Extract precision/scale for Numeric types
 -                 if isinstance(type_obj, sa_types.Numeric):
 -                     if type_obj.precision:
 -                         params['precision'] = type_obj.precision
 -                     if type_obj.scale:
 -                         params['scale'] = type_obj.scale
-- 
+-
 -                 # Handle Enum - store choices if possible
 -                 if isinstance(type_obj, sa_types.Enum) and type_obj.enums:
 -                     params['enum_values'] = list(type_obj.enums)
-- 
+-
 -                 # Handle DateTime timezone
 -                 if isinstance(type_obj, sa_types.DateTime) and type_obj.timezone:
 -                     params['timezone'] = True
-- 
+-
 -                 return CanonicalType(kind="primitive", name=canonical_name, params=params, constraints=constraints)
 +     def to_canonical(self, type_obj: Type) -> CanonicalType:
 +         """Convert a SQLAlchemy type to CanonicalType."""
@@ -1827,7 +1827,7 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 +             # Extract type info
 +             type_name = getattr(type_obj, '__visit_name__', 'unknown')
 +             type_params = {}
-+             
++
 +             # Map common SQL types to canonical primitives
 +             sql_to_canonical = {
 +                 'integer': 'int',
@@ -1840,9 +1840,9 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 +                 'interval': 'timedelta',
 +                 'binary': 'bytes'
 +             }
-+             
++
 +             canonical_name = sql_to_canonical.get(type_name, 'any')
-+             
++
 +             # Extract type parameters if available
 +             if hasattr(type_obj, 'length'):
 +                 type_params['length'] = type_obj.length
@@ -1850,7 +1850,7 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 +                 type_params['precision'] = type_obj.precision
 +             if hasattr(type_obj, 'scale'):
 +                 type_params['scale'] = type_obj.scale
-+                 
++
 +             return CanonicalType(
 +                 kind="primitive",
 +                 name=canonical_name,
@@ -1860,7 +1860,7 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 +                     "sql_type": type_name
 +                 })
 +             )
-  
+
 -         # Fallback for unknown SA types
 -         return CanonicalType(kind="primitive", name="any", meta={"original_type": str(type_obj)})
 +         # Fallback for unknown types
@@ -1872,7 +1872,7 @@ Now let's fix the `meta` usage in the SQLAlchemy plugin:
 +                 "original_type": str(type_obj)
 +             })
 +         )
-  
+
       @lru_cache(maxsize=128)
 ```
 
@@ -1884,7 +1884,7 @@ Now let's fix the `meta` usage in the Pandas plugin:
 
 ```diff
           )
-  
+
 -     def _dtype_to_canonical(self, dtype: np.dtype) -> CanonicalType:
 -         """Maps numpy/pandas dtype object to CanonicalType."""
 -         # Use pandas API functions for robustness
@@ -1911,13 +1911,13 @@ Now let's fix the `meta` usage in the Pandas plugin:
 -             cat_dtype = dtype.categories.dtype
 -             return CanonicalType(kind="container", name="category", params={"item_type": self._dtype_to_canonical(cat_dtype)})
 -         # Add more specific types like Period if needed
-- 
+-
 -         return CanonicalType(kind="primitive", name="any", meta={"original_dtype": str(dtype)}) # Fallback
 +     def _dtype_to_canonical(self, dtype: Any) -> CanonicalType:
 +         """Helper to convert pandas dtype to CanonicalType."""
 +         # Extract the dtype name and any parameters
 +         dtype_name = str(dtype)
-+         
++
 +         # Handle numpy/pandas dtypes
 +         if dtype_name.startswith('int'):
 +             return CanonicalType(
@@ -1992,7 +1992,7 @@ Now let's fix the `meta` usage in the Pandas plugin:
 +                     "is_categorical": True
 +                 })
 +             )
-+             
++
 +         # Fallback for unknown dtypes
 +         return CanonicalType(
 +             kind="primitive",
@@ -2002,8 +2002,8 @@ Now let's fix the `meta` usage in the Pandas plugin:
 +                 "original_dtype": dtype_name
 +             })
 +         )
-  
-  
+
+
 ```
 
 ---
@@ -2014,17 +2014,17 @@ Now let's fix the missing `meta` in the Pandera plugin:
 
 ```diff
       pa = None # Allow type checking
-  
+
 - from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
   # Import constraint classes
-  
+
       @lru_cache(maxsize=128)
 -     def to_canonical(self, type_obj: Union[pa.DataType, Type[pa.DataType]]) -> CanonicalType:
 -         """Converts a Pandera type to CanonicalType, including constraints."""
 -         pa_type_class = type_obj if isinstance(type_obj, type) else type(type_obj)
-- 
+-
 -         canonical_name = "any" # Default
 -         for pa_class, c_name in self._to_canonical_map.items():
 -              # Check inheritance for Pandera types
@@ -2036,7 +2036,7 @@ Now let's fix the missing `meta` in the Pandera plugin:
 -                  if isinstance(type_obj, pa_class):
 -                      canonical_name = c_name
 -                      break
-- 
+-
 -         # Extract constraints from Pandera Checks attached to the type instance
 -         constraints = {}
 -         if isinstance(type_obj, pa.DataType) and hasattr(type_obj, 'checks') and type_obj.checks:
@@ -2045,7 +2045,7 @@ Now let's fix the missing `meta` in the Pandera plugin:
 -                 if constraint:
 -                     # Use constraint class name as key? Or type string?
 -                     constraints[constraint.__class__.__name__] = constraint
-- 
+-
 -         # Pandera usually handles nullability via Column(nullable=True) not the dtype
 -         return CanonicalType(kind="primitive", name=canonical_name, constraints=constraints)
 +     def to_canonical(self, type_obj: Type) -> CanonicalType:
@@ -2054,12 +2054,12 @@ Now let's fix the missing `meta` in the Pandera plugin:
 +         if isinstance(type_obj, type) and hasattr(type_obj, '__pandera_schema__'):
 +             fields = {}
 +             schema = type_obj.__pandera_schema__
-+             
++
 +             # Extract field information
 +             for name, field in schema.fields.items():
 +                 field_type = field.dtype
 +                 field_constraints = {}
-+                 
++
 +                 # Map constraints
 +                 if field.nullable is not None:
 +                     field_constraints['nullable'] = field.nullable
@@ -2067,14 +2067,14 @@ Now let's fix the missing `meta` in the Pandera plugin:
 +                     field_constraints['unique'] = True
 +                 if field.coerce:
 +                     field_constraints['coerce'] = True
-+                 
++
 +                 # Add field to fields dict
 +                 fields[name] = {
 +                     "type": self._map_pandera_type(field_type),
 +                     "constraints": field_constraints,
 +                     "required": not field.nullable
 +                 }
-+             
++
 +             return CanonicalType(
 +                 kind="composite",
 +                 name=type_obj.__name__,
@@ -2084,7 +2084,7 @@ Now let's fix the missing `meta` in the Pandera plugin:
 +                     "pandera_schema": str(schema)
 +                 })
 +             )
-+         
++
 +         # Handle basic Pandera types
 +         if hasattr(type_obj, '__pandera_base__'):
 +             base_type = type_obj.__pandera_base__
@@ -2096,7 +2096,7 @@ Now let's fix the missing `meta` in the Pandera plugin:
 +                     "pandera_type": str(type_obj)
 +                 })
 +             )
-+         
++
 +         # Fallback for unknown types
 +         return CanonicalType(
 +             kind="primitive",
@@ -2106,8 +2106,8 @@ Now let's fix the missing `meta` in the Pandera plugin:
 +                 "original_type": str(type_obj)
 +             })
 +         )
-  
-  
+
+
 ```
 
 ---
@@ -2128,7 +2128,7 @@ Now let's fix the strategy call signature in the ConversionEngine:
 +                 else target if isinstance(target, TypeSystem)
 +                 else None
 +             )
-+ 
++
 +             context = ConversionContext(
 +                 source=source_canonical,
 +                 target=target_canonical,
@@ -2136,13 +2136,13 @@ Now let's fix the strategy call signature in the ConversionEngine:
 +                 target_type_system=target_system,
 +                 strict=strict
 +             )
-+             
++
 +             return strategy.convert(value, context)
           except Exception as e:
 -             raise ConversionError(f"Conversion failed: {e}") from e
 +             # Add more context to the error message
 +             raise ConversionError(f"Conversion failed using strategy {type(strategy).__name__}: {e}") from e
-  
+
       def _resolve_canonical(
 ```
 
@@ -2153,11 +2153,11 @@ Now let's fix the model class retrieval in the DictToModelStrategy:
 ---
 
 ```diff
-  
+
   class DictToModelStrategy(ConversionStrategy):
 -     """Strategy for converting dictionaries to Pydantic/SQLModel instances."""
 +     """Strategy for converting dictionaries to model instances."""
-  
+
       def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 -         """Check if this strategy can handle the conversion."""
 +         """Returns True if source is a dict and target is a composite type."""
@@ -2168,13 +2168,13 @@ Now let's fix the model class retrieval in the DictToModelStrategy:
 +             source.kind == "container" and source.name == "dict" and
 +             target.kind == "composite"
           )
-  
+
       def convert(self, value: Any, context: ConversionContext) -> Any:
 -         """Convert a dictionary to a Pydantic/SQLModel instance."""
 +         """Convert a dictionary to a model instance."""
           if not isinstance(value, dict):
               raise ConversionError(f"Expected dict, got {type(value)}")
-  
+
 -         # Get model class from target type
 -         model_class = context.target.metadata.get("model_class")
 -         if not model_class:
@@ -2182,7 +2182,7 @@ Now let's fix the model class retrieval in the DictToModelStrategy:
 +         # Get model class using the target type system and canonical type
 +         if not context.target_type_system:
 +             raise ConversionError("Target type system not found in context for DictToModelStrategy")
-+         
++
 +         try:
 +             model_class = context.target_type_system.from_canonical(context.target)
 +             if not isinstance(model_class, type):
@@ -2191,13 +2191,13 @@ Now let's fix the model class retrieval in the DictToModelStrategy:
 +             raise ConversionError(f"Target system '{context.target_type_system.name}' cannot reconstruct model from canonical type.")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to get target model class from canonical type: {e}")
-  
+
           # Convert dict to model instance
           try:
               return self._create_model_instance(model_class, value, context.strict)
           except Exception as e:
 -             raise ConversionError(f"Failed to create model instance: {str(e)}")
-- 
+-
 -     @lru_cache(maxsize=128)
 -     def _create_model_instance(
 -         self,
@@ -2207,29 +2207,29 @@ Now let's fix the model class retrieval in the DictToModelStrategy:
 -     ) -> Any:
 -         """Create a model instance with caching for performance."""
 -         pydantic_version = get_pydantic_version()
-- 
+-
 -         if pydantic_version == 1:
 +             raise ConversionError(f"Failed to create model instance of {model_class.__name__}: {e}")
-+ 
++
 +     def _create_model_instance(self, model_class: Type, data: Dict[str, Any], strict: bool) -> Any:
 +         """Helper to create a model instance from dict data."""
 +         try:
 +             # Try direct instantiation first
               return model_class(**data)
 -         else:  # Pydantic v2
--             return model_class.model_validate(data) if strict else model_class.model_construct(**data) 
+-             return model_class.model_validate(data) if strict else model_class.model_construct(**data)
 +         except Exception as e:
 +             if strict:
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}")
-+             
++
 +             # In non-strict mode, try to filter out invalid fields
 +             valid_fields = set(getattr(model_class, '__fields__', {}))
 +             if not valid_fields:
 +                 # If we can't determine valid fields, just re-raise the original error
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance and could not determine valid fields: {e}")
-+             
++
 +             filtered_data = {k: v for k, v in data.items() if k in valid_fields}
-+             return model_class(**filtered_data) 
++             return model_class(**filtered_data)
 ```
 
 ---
@@ -2239,11 +2239,11 @@ Now let's fix the model class retrieval in the PandasToModelListStrategy:
 ---
 
 ```diff
-  
+
   class PandasToModelListStrategy(ConversionStrategy):
 -     """Strategy for converting pandas DataFrames to lists of Pydantic/SQLModel instances."""
 +     """Strategy for converting pandas DataFrame to list of model instances."""
-  
+
       def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 -         """Check if this strategy can handle the conversion."""
 +         """Returns True if source is a DataFrame and target is a list of models."""
@@ -2257,7 +2257,7 @@ Now let's fix the model class retrieval in the PandasToModelListStrategy:
 +             target.kind == "container" and target.name == "list" and
 +             target.params.get("item_type", {}).kind == "composite"
           )
-  
+
       def convert(self, value: Any, context: ConversionContext) -> List[Any]:
 -         """Convert a pandas DataFrame to a list of Pydantic/SQLModel instances."""
 +         """Convert a pandas DataFrame to a list of model instances."""
@@ -2266,10 +2266,10 @@ Now let's fix the model class retrieval in the PandasToModelListStrategy:
           except ImportError:
 -             raise PolitipoError("pandas is required for PandasToModelListStrategy")
 +             raise ConversionError("pandas is not installed")
-  
+
           if not isinstance(value, pd.DataFrame):
               raise ConversionError(f"Expected pandas DataFrame, got {type(value)}")
-  
+
 -         # Get model class from target type
 -         model_class = context.target.metadata.get("item_type", {}).get("metadata", {}).get("model_class")
 -         if not model_class:
@@ -2278,12 +2278,12 @@ Now let's fix the model class retrieval in the PandasToModelListStrategy:
 +         item_canonical_type = context.target.params.get("item_type")
 +         if not item_canonical_type:
 +             raise ConversionError("Target list type missing 'item_type' in params")
-+ 
++
 +         # Get the target item's type system (likely the same as the list's target system)
 +         item_system = context.target_type_system
 +         if not item_system:
 +             raise ConversionError("Target type system not found in context for PandasToModelListStrategy")
-+ 
++
 +         try:
 +             model_class = item_system.from_canonical(item_canonical_type)
 +             if not isinstance(model_class, type):
@@ -2292,12 +2292,12 @@ Now let's fix the model class retrieval in the PandasToModelListStrategy:
 +             raise ConversionError(f"Target system '{item_system.name}' cannot reconstruct model from canonical type.")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to get target model class for list item: {e}")
-  
+
           # Convert DataFrame to list of dicts
               ]
           except Exception as e:
 -             raise ConversionError(f"Failed to create model instances: {str(e)}")
-- 
+-
 -     @lru_cache(maxsize=128)
 -     def _create_model_instance(
 -         self,
@@ -2307,29 +2307,29 @@ Now let's fix the model class retrieval in the PandasToModelListStrategy:
 -     ) -> Any:
 -         """Create a model instance with caching for performance."""
 -         pydantic_version = get_pydantic_version()
-- 
+-
 -         if pydantic_version == 1:
 +             raise ConversionError(f"Failed to create model instances of {model_class.__name__}: {e}")
-+ 
++
 +     def _create_model_instance(self, model_class: Type, data: Dict[str, Any], strict: bool) -> Any:
 +         """Helper to create a model instance from dict data."""
 +         try:
 +             # Try direct instantiation first
               return model_class(**data)
 -         else:  # Pydantic v2
--             return model_class.model_validate(data) if strict else model_class.model_construct(**data) 
+-             return model_class.model_validate(data) if strict else model_class.model_construct(**data)
 +         except Exception as e:
 +             if strict:
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}")
-+             
++
 +             # In non-strict mode, try to filter out invalid fields
 +             valid_fields = set(getattr(model_class, '__fields__', {}))
 +             if not valid_fields:
 +                 # If we can't determine valid fields, just re-raise the original error
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance and could not determine valid fields: {e}")
-+             
++
 +             filtered_data = {k: v for k, v in data.items() if k in valid_fields}
-+             return model_class(**filtered_data) 
++             return model_class(**filtered_data)
 ```
 
 ---
@@ -2339,11 +2339,11 @@ Finally, let's fix the model class retrieval in the PolarsToListStrategy:
 ---
 
 ```diff
-  
+
   class PolarsToListStrategy(ConversionStrategy):
 -     """Strategy for converting Polars DataFrames to lists of dictionaries or model instances."""
 +     """Strategy for converting Polars DataFrame to list of model instances."""
-  
+
       def can_handle(self, source: CanonicalType, target: CanonicalType) -> bool:
 -         """Check if this strategy can handle the conversion."""
 +         """Returns True if source is a DataFrame and target is a list of models."""
@@ -2362,7 +2362,7 @@ Finally, let's fix the model class retrieval in the PolarsToListStrategy:
 +             target.kind == "container" and target.name == "list" and
 +             target.params.get("item_type", {}).kind == "composite"
           )
-  
+
       def convert(self, value: Any, context: ConversionContext) -> List[Any]:
 -         """Convert a Polars DataFrame to a list of dictionaries or model instances."""
 +         """Convert a Polars DataFrame to a list of model instances."""
@@ -2371,20 +2371,20 @@ Finally, let's fix the model class retrieval in the PolarsToListStrategy:
           except ImportError:
 -             raise PolitipoError("polars is required for PolarsToListStrategy")
 +             raise ConversionError("polars is not installed")
-  
+
           if not isinstance(value, pl.DataFrame):
               raise ConversionError(f"Expected Polars DataFrame, got {type(value)}")
-  
+
 +         # Get the canonical type for the list item
 +         item_canonical_type = context.target.params.get("item_type")
 +         if not item_canonical_type:
 +             raise ConversionError("Target list type missing 'item_type' in params")
-+ 
++
 +         # Get the target item's type system (likely the same as the list's target system)
 +         item_system = context.target_type_system
 +         if not item_system:
 +             raise ConversionError("Target type system not found in context for PolarsToListStrategy")
-+ 
++
 +         try:
 +             model_class = item_system.from_canonical(item_canonical_type)
 +             if not isinstance(model_class, type):
@@ -2393,15 +2393,15 @@ Finally, let's fix the model class retrieval in the PolarsToListStrategy:
 +             raise ConversionError(f"Target system '{item_system.name}' cannot reconstruct model from canonical type.")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to get target model class for list item: {e}")
-+ 
++
           # Convert DataFrame to list of dicts
 -         records = value.to_dicts()
-- 
+-
 -         # If target is list of dicts, we're done
 -         item_type = context.target.metadata.get("item_type", {})
 -         if item_type.get("kind") == "dict":
 -             return records
-- 
+-
 -         # Otherwise, convert to model instances
 -         model_class = item_type.get("metadata", {}).get("model_class")
 -         if not model_class:
@@ -2410,12 +2410,12 @@ Finally, let's fix the model class retrieval in the PolarsToListStrategy:
 +             records = value.to_dicts()
 +         except Exception as e:
 +             raise ConversionError(f"Failed to convert Polars DataFrame to dicts: {e}")
-  
+
           # Convert each dict to a model instance
               ]
           except Exception as e:
 -             raise ConversionError(f"Failed to create model instances: {str(e)}")
-- 
+-
 -     @lru_cache(maxsize=128)
 -     def _create_model_instance(
 -         self,
@@ -2425,29 +2425,29 @@ Finally, let's fix the model class retrieval in the PolarsToListStrategy:
 -     ) -> Any:
 -         """Create a model instance with caching for performance."""
 -         pydantic_version = get_pydantic_version()
-- 
+-
 -         if pydantic_version == 1:
 +             raise ConversionError(f"Failed to create model instances of {model_class.__name__}: {e}")
-+ 
++
 +     def _create_model_instance(self, model_class: Type, data: Dict[str, Any], strict: bool) -> Any:
 +         """Helper to create a model instance from dict data."""
 +         try:
 +             # Try direct instantiation first
               return model_class(**data)
 -         else:  # Pydantic v2
--             return model_class.model_validate(data) if strict else model_class.model_construct(**data) 
+-             return model_class.model_validate(data) if strict else model_class.model_construct(**data)
 +         except Exception as e:
 +             if strict:
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}")
-+             
++
 +             # In non-strict mode, try to filter out invalid fields
 +             valid_fields = set(getattr(model_class, '__fields__', {}))
 +             if not valid_fields:
 +                 # If we can't determine valid fields, just re-raise the original error
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance and could not determine valid fields: {e}")
-+             
++
 +             filtered_data = {k: v for k, v in data.items() if k in valid_fields}
-+             return model_class(**filtered_data) 
++             return model_class(**filtered_data)
 ```
 
 ---
@@ -2818,7 +2818,7 @@ I'll help implement these tasks one by one.
 
 ```diff
                raise PolitipoError("Pandas is not installed. Cannot initialize PandasTypeSystem.")
-  
+
 -     @lru_cache(maxsize=128) # Added cache
 +     @lru_cache(maxsize=128)
       def to_canonical(self, df_or_type: Union[pd.DataFrame, Type, np.dtype, str]) -> CanonicalType:
@@ -2917,7 +2917,7 @@ I'll help implement these tasks one by one.
 +                     )
                   elif isinstance(df_or_type, np.dtype):
                       dtype = df_or_type
-  
+
               except Exception as e:
 -                   raise ConversionError(f"Failed to convert Pandas type '{df_or_type}' to canonical: {e}") from e
 +                 # Fallback case - ensure TypeMeta is used
@@ -2929,8 +2929,8 @@ I'll help implement these tasks one by one.
 +                         "original_type": str(df_or_type)
 +                     })
 +                 )
-  
-  
+
+
 ```
 
 ---
@@ -2955,11 +2955,11 @@ Now let's update the `__init__.py` file:
 - from .type_converter import TypeConverter
 - from .type_mapper import TypeMapper
 + """Politipo: Type Harmony for Python."""
-+ 
++
 + from politipo.core.conversion import ConversionEngine
 + from politipo.core.types import TypeSystem, CanonicalType
 + from politipo.core.errors import ConversionError, PolitipoError
-+ 
++
 + # Plugin type systems
 + from politipo.plugins.python import PythonTypeSystem
 + from politipo.plugins.pydantic import PydanticTypeSystem
@@ -2968,7 +2968,7 @@ Now let's update the `__init__.py` file:
 + from politipo.plugins.sqlalchemy import SQLAlchemyTypeSystem
 + from politipo.plugins.sqlmodel import SQLModelTypeSystem
 + from politipo.plugins.pandera import PanderaTypeSystem
-+ 
++
 + __all__ = [
 +     # Core components
 +     "ConversionEngine",
@@ -2976,7 +2976,7 @@ Now let's update the `__init__.py` file:
 +     "CanonicalType",
 +     "ConversionError",
 +     "PolitipoError",
-+     
++
 +     # Type systems
 +     "PythonTypeSystem",
 +     "PydanticTypeSystem",
@@ -3021,26 +3021,26 @@ Now let's update the `__init__.py` file:
 +                     valid_field_names = getattr(model_class, '__fields__', {}).keys()
 +                     filtered_data = {k: v for k, v in data.items() if k in valid_field_names}
 +                     return model_class(**filtered_data)
-+ 
++
           except Exception as e:
 +             # This block might become less necessary with model_construct/filtering above,
 +             # but keep as a final safety net if direct **kwargs fails in v1 non-strict.
               if strict:
 -                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}")
--             
+-
 -             # In non-strict mode, try to filter out invalid fields
 -             valid_fields = set(getattr(model_class, '__fields__', {}))
 -             if not valid_fields:
 -                 # If we can't determine valid fields, just re-raise the original error
 -                 raise ConversionError(f"Failed to create {model_class.__name__} instance and could not determine valid fields: {e}")
--             
+-
 -             filtered_data = {k: v for k, v in data.items() if k in valid_fields}
--             return model_class(**filtered_data) 
+-             return model_class(**filtered_data)
 +                 # Re-raise if strict mode failed validation/construction
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}") from e
 +             else:
 +                 # If even filtering + construction failed in non-strict, raise with context
-+                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e 
++                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e
 ```
 
 ---
@@ -3076,26 +3076,26 @@ Let's update `PandasToModelListStrategy` with the same changes:
 +                     valid_field_names = getattr(model_class, '__fields__', {}).keys()
 +                     filtered_data = {k: v for k, v in data.items() if k in valid_field_names}
 +                     return model_class(**filtered_data)
-+ 
++
           except Exception as e:
 +             # This block might become less necessary with model_construct/filtering above,
 +             # but keep as a final safety net if direct **kwargs fails in v1 non-strict.
               if strict:
 -                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}")
--             
+-
 -             # In non-strict mode, try to filter out invalid fields
 -             valid_fields = set(getattr(model_class, '__fields__', {}))
 -             if not valid_fields:
 -                 # If we can't determine valid fields, just re-raise the original error
 -                 raise ConversionError(f"Failed to create {model_class.__name__} instance and could not determine valid fields: {e}")
--             
+-
 -             filtered_data = {k: v for k, v in data.items() if k in valid_fields}
--             return model_class(**filtered_data) 
+-             return model_class(**filtered_data)
 +                 # Re-raise if strict mode failed validation/construction
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}") from e
 +             else:
 +                 # If even filtering + construction failed in non-strict, raise with context
-+                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e 
++                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e
 ```
 
 ---
@@ -3131,26 +3131,26 @@ Finally, let's update `PolarsToListStrategy` with the same changes:
 +                     valid_field_names = getattr(model_class, '__fields__', {}).keys()
 +                     filtered_data = {k: v for k, v in data.items() if k in valid_field_names}
 +                     return model_class(**filtered_data)
-+ 
++
           except Exception as e:
 +             # This block might become less necessary with model_construct/filtering above,
 +             # but keep as a final safety net if direct **kwargs fails in v1 non-strict.
               if strict:
 -                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}")
--             
+-
 -             # In non-strict mode, try to filter out invalid fields
 -             valid_fields = set(getattr(model_class, '__fields__', {}))
 -             if not valid_fields:
 -                 # If we can't determine valid fields, just re-raise the original error
 -                 raise ConversionError(f"Failed to create {model_class.__name__} instance and could not determine valid fields: {e}")
--             
+-
 -             filtered_data = {k: v for k, v in data.items() if k in valid_fields}
--             return model_class(**filtered_data) 
+-             return model_class(**filtered_data)
 +                 # Re-raise if strict mode failed validation/construction
 +                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}") from e
 +             else:
 +                 # If even filtering + construction failed in non-strict, raise with context
-+                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e 
++                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e
 ```
 
 ---
@@ -3707,11 +3707,11 @@ First, let's create the new `model_types.py` file:
 ---
 
 ```diff
-- 
+-
 + import inspect
 + from typing import Any, Type
 + from functools import lru_cache
-+ 
++
 + try:
 +     from sqlalchemy.orm import DeclarativeBase, RelationshipProperty
 +     from sqlalchemy.inspection import inspect as sqlalchemy_inspect
@@ -3719,23 +3719,23 @@ First, let's create the new `model_types.py` file:
 +     DeclarativeBase = None
 +     RelationshipProperty = None
 +     sqlalchemy_inspect = None
-+ 
++
 + from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
 + from politipo.core.errors import ConversionError, PolitipoError
 + from .types import SQLAlchemyTypeSystem
-+ 
-+ 
++
++
 + class SQLAlchemyModelTypeSystem(TypeSystem):
 +     """Type system implementation for SQLAlchemy declarative models (table structures)."""
-+ 
++
 +     name = "sqlalchemy_model"
-+ 
++
 +     def __init__(self):
 +         if DeclarativeBase is None:
 +             raise PolitipoError("SQLAlchemy is not installed or version mismatch.")
 +         # Instantiate the column type system - improve with registry/DI later
 +         self._col_type_system = SQLAlchemyTypeSystem()
-+ 
++
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns a generic SQLAlchemy Model type."""
 +         return CanonicalType(
@@ -3744,22 +3744,22 @@ First, let's create the new `model_types.py` file:
 +             params={"fields": {}},
 +             meta=TypeMeta(data={"origin_system": self.name})
 +         )
-+ 
++
 +     @lru_cache(maxsize=64)
 +     def to_canonical(self, type_obj: Type) -> CanonicalType:
 +         """Converts a SQLAlchemy declarative model class to CanonicalType."""
 +         if not self.detect(type_obj):
 +             raise ConversionError(f"Object {type_obj} is not a recognized SQLAlchemy declarative model class.")
-+ 
++
 +         try:
 +             mapper = sqlalchemy_inspect(type_obj)
 +             table = mapper.local_table
 +         except Exception as e:
 +             raise ConversionError(f"Could not inspect SQLAlchemy model {type_obj.__name__}: {e}")
-+ 
++
 +         fields = {}
 +         pk_col_names = set(pk_col.name for pk_col in table.primary_key.columns)
-+ 
++
 +         for col in table.columns:
 +             # Get column type canonical representation
 +             try:
@@ -3772,7 +3772,7 @@ First, let's create the new `model_types.py` file:
 +                     name="any",
 +                     meta=TypeMeta(data={"error": str(e)})
 +                 )
-+ 
++
 +             # Add primary key info to column type meta if applicable
 +             is_pk = col.name in pk_col_names
 +             if is_pk:
@@ -3787,7 +3787,7 @@ First, let's create the new `model_types.py` file:
 +                     constraints=canonical_col_type.constraints,
 +                     meta=TypeMeta(data=col_meta_data)
 +                 )
-+ 
++
 +             # Handle default - this can be complex (scalar, SQL func, Python func)
 +             default_value_repr = ...  # Ellipsis for no default
 +             if col.default is not None:
@@ -3796,7 +3796,7 @@ First, let's create the new `model_types.py` file:
 +                     default_value_repr = col.default.arg
 +                 # TODO: Handle SQL functions, Python callables etc. - complex
 +                 # else: default_value_repr = f"SQLDefault({col.default})"
-+ 
++
 +             # Use standard field structure
 +             fields[col.name] = {
 +                 "type": canonical_col_type,
@@ -3804,7 +3804,7 @@ First, let's create the new `model_types.py` file:
 +                 "default": default_value_repr,
 +                 "description": col.comment,
 +             }
-+ 
++
 +         # Extract table metadata
 +         meta_data = {
 +             "origin_system": self.name,
@@ -3815,7 +3815,7 @@ First, let's create the new `model_types.py` file:
 +             "sql_relationships": {},  # Placeholder for relationship info
 +             "description": inspect.getdoc(type_obj),
 +         }
-+ 
++
 +         # Extract basic relationship info (complex details deferred)
 +         try:
 +             for name, prop in mapper.relationships.items():
@@ -3827,19 +3827,19 @@ First, let's create the new `model_types.py` file:
 +                 }
 +         except Exception:
 +             meta_data["sql_relationships"] = {"error": "Failed to extract relationships"}
-+ 
++
 +         return CanonicalType(
 +             kind="composite",
 +             name=type_obj.__name__,
 +             params={"fields": fields},  # Use standardized 'fields' key
 +             meta=TypeMeta(data=meta_data)
 +         )
-+ 
++
 +     @lru_cache(maxsize=64)
 +     def from_canonical(self, canonical: CanonicalType) -> Type:
 +         """Dynamic SQLAlchemy model creation is not supported yet."""
 +         raise NotImplementedError("Dynamic SQLAlchemy model reconstruction from CanonicalType is complex and not yet supported.")
-+ 
++
 +     def detect(self, obj: Any) -> bool:
 +         """Returns True if obj is a SQLAlchemy declarative model class."""
 +         # Need robust check, isinstance(obj, type) and having __table__ is a good start
@@ -3850,7 +3850,7 @@ First, let's create the new `model_types.py` file:
 +             hasattr(obj, '__table__') and  # Mapped class indicator
 +             hasattr(obj, '__mapper__') and  # Mapped class indicator
 +             obj is not DeclarativeBase  # Don't detect the base itself
-+         ) 
++         )
 ```
 
 ---
@@ -3899,7 +3899,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 - from typing import Any, Type
 + from typing import Any, Dict, Type
   from functools import lru_cache
-  
+
   try:
       from sqlmodel import SQLModel
 +     from pydantic.fields import FieldInfo
@@ -3909,24 +3909,24 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +     SQLModel = None
 +     FieldInfo = None
 +     # Allow type checking
-  
+
   from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
   # Import Pydantic system for delegation - assumes it's registered
   # This creates a dependency, might need a registry lookup instead
 - # from politipo.plugins.pydantic import PydanticTypeSystem
 + from politipo.plugins.pydantic import PydanticTypeSystem
-  
-  
+
+
   class SQLModelTypeSystem(TypeSystem):
 -     """Type system implementation for SQLModel models.
 -        NOTE: This is a basic implementation, primarily detecting SQLModel classes.
 -        Conversion logic might need significant refinement or delegation.
 -     """
 +     """Type system implementation for SQLModel classes."""
-  
+
       name = "sqlmodel"
-  
+
 +     def __init__(self):
 +         if SQLModel is None:
 +             raise PolitipoError("SQLModel is not installed.")
@@ -3935,7 +3935,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +             self._pydantic_system = PydanticTypeSystem()
 +         except PolitipoError:
 +             raise PolitipoError("Pydantic must be installed to use SQLModelTypeSystem.")
-+ 
++
       def get_default_canonical(self) -> CanonicalType:
 -         """Returns a generic SQLModel type as the default target."""
 +         """Returns a generic SQLModel type."""
@@ -3956,7 +3956,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 -                 "sql_relationships": {}
 -             })
 -         )
-- 
+-
 -     def __init__(self):
 -         if SQLModel is None:
 -             raise PolitipoError("SQLModel is not installed. Cannot initialize SQLModelTypeSystem.")
@@ -3965,13 +3965,13 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +                 "is_sqlmodel": True
 +             })
 +         )
-+ 
++
 +     @lru_cache(maxsize=128)
 +     def to_canonical(self, type_obj: Type[SQLModel]) -> CanonicalType:
 +         """Converts a SQLModel class to CanonicalType by combining Pydantic structure and SQL metadata."""
 +         if not self.detect(type_obj):
 +             raise ConversionError(f"Object {type_obj} is not a SQLModel class.")
-+ 
++
 +         # 1. Get Pydantic Canonical Representation
 +         try:
 +             pydantic_canonical = self._pydantic_system.to_canonical(type_obj)
@@ -3980,7 +3980,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +                 raise ConversionError("Pydantic plugin did not return a composite type for SQLModel.")
 +         except Exception as e:
 +             raise ConversionError(f"Failed to get Pydantic canonical representation for {type_obj.__name__}: {e}")
-+ 
++
 +         # 2. Extract SQL Specific Metadata
 +         sql_meta_data = {
 +             "origin_system": self.name,  # Override origin
@@ -3988,7 +3988,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +         }
 +         # Table name
 +         sql_meta_data['sql_tablename'] = getattr(type_obj, '__tablename__', type_obj.__name__.lower())  # Default convention
-+ 
++
 +         # Primary Keys (Check Pydantic fields for primary_key=True)
 +         pk_names = []
 +         try:
@@ -4000,7 +4000,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +         except Exception:
 +             pass  # Ignore errors inspecting fields for PK
 +         sql_meta_data['sql_primary_key'] = pk_names
-+ 
++
 +         # Extract Indexes from __table_args__
 +         sql_meta_data['sql_indexes'] = []
 +         try:
@@ -4011,7 +4011,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +                         sql_meta_data['sql_indexes'].append(str(arg))
 +         except Exception:
 +             pass  # Ignore errors extracting indexes
-+ 
++
 +         # Extract Relationships
 +         sql_meta_data['sql_relationships'] = {}
 +         try:
@@ -4025,11 +4025,11 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +                     }
 +         except Exception:
 +             pass  # Ignore errors extracting relationships
-+ 
++
 +         # 3. Merge Metadata
 +         final_meta_data = pydantic_canonical.meta.data.copy() if pydantic_canonical.meta else {}
 +         final_meta_data.update(sql_meta_data)  # SQLModel specifics override/add
-+ 
++
 +         # 4. Return combined CanonicalType
 +         return CanonicalType(
 +             kind=pydantic_canonical.kind,
@@ -4038,12 +4038,12 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +             constraints=pydantic_canonical.constraints,  # Reuse constraints from Pydantic version
 +             meta=TypeMeta(data=final_meta_data)
 +         )
-+ 
++
 +     @lru_cache(maxsize=128)
 +     def from_canonical(self, canonical: CanonicalType) -> Type[SQLModel]:
 +         """Dynamic SQLModel creation is not supported yet."""
 +         raise NotImplementedError("Dynamic SQLModel reconstruction from CanonicalType is complex and not yet supported.")
-+ 
++
 +     def detect(self, obj: Any) -> bool:
 +         """Returns True if obj is a SQLModel class."""
 +         return (
@@ -4051,10 +4051,10 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +             isinstance(obj, type) and
 +             issubclass(obj, SQLModel)
 +         )
-  
+
       # @property
       #     return self._pydantic_system
-  
+
 -     @lru_cache(maxsize=128)
 -     def to_canonical(self, type_obj: Type[SQLModel]) -> CanonicalType:
 -         """Converts a SQLModel class to CanonicalType.
@@ -4069,7 +4069,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +     #     """
 +     #     if not self.detect(type_obj):
 +     #          raise ConversionError(f"Object {type_obj} is not a SQLModel class.")
-  
+
 -         fields = {}
 -         try:
 -             # Use Pydantic v2+ field inspection if available
@@ -4094,14 +4094,14 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +     #              for name, field in getattr(type_obj, '__fields__', {}).items():
 +     #                  field_canon = CanonicalType(kind="primitive", name="any", meta=TypeMeta(data={"details": "sqlmodel_field_placeholder"}))
 +     #                  fields[name] = {"type": field_canon, "constraints": {}, "required": field.required}
-  
+
 -         except AttributeError:
 -              # Failed to get fields, return basic structure
 -              pass
 +     #     except AttributeError:
 +     #          # Failed to get fields, return basic structure
 +     #          pass
-  
+
 -         # Extract potential table name, primary key info etc. into meta
 -         meta_data = {
 -             "origin_system": self.name,
@@ -4118,7 +4118,7 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +     #     if hasattr(type_obj, '__tablename__'):
 +     #         meta_data['sql_tablename'] = type_obj.__tablename__
 +     #     # Add more SQL specific metadata extraction here
-  
+
 -         return CanonicalType(
 -             kind="composite",
 -             name=type_obj.__name__,
@@ -4131,14 +4131,14 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 +     #         params={"fields": fields},
 +     #         meta=TypeMeta(data=meta_data)
 +     #     )
-  
+
 -         # Ideal delegation:
 -         # canon = self.pydantic_system.to_canonical(type_obj)
 -         # # Add SQLModel specific metadata
 -         # sql_meta = {"is_sqlmodel": True, ...}
 -         # merged_meta = {**(canon.meta or {}), **sql_meta}
 -         # return CanonicalType(kind=canon.kind, name=canon.name, params=canon.params, constraints=canon.constraints, meta=merged_meta)
-- 
+-
 -     @lru_cache(maxsize=128)
 -     def from_canonical(self, canonical: CanonicalType) -> Type[SQLModel]:
 -         """Reconstructs a SQLModel class from CanonicalType. HIGHLY EXPERIMENTAL."""
@@ -4150,17 +4150,17 @@ Now let's implement Task 2, updating the SQLModel plugin to properly combine Pyd
 -         # 1. Extract fields and try to build Pydantic part (delegate to Pydantic system?)
 -         # 2. Extract SQL metadata from canonical.meta
 -         # 3. Use SQLModel's dynamic creation utilities if they exist, or construct class definition string and exec.
-- 
+-
 -     def detect(self, obj: Any) -> bool:
 -         """Returns True if the object is a SQLModel class."""
 -         if SQLModel is None: return False
--         return isinstance(obj, type) and issubclass(obj, SQLModel) 
+-         return isinstance(obj, type) and issubclass(obj, SQLModel)
 +     #     # Ideal delegation:
 +     #     # canon = self.pydantic_system.to_canonical(type_obj)
 +     #     # # Add SQLModel specific metadata
 +     #     # sql_meta = {"is_sqlmodel": True, ...}
 +     #     # merged_meta = {**(canon.meta or {}), **sql_meta}
-+     #     # return CanonicalType(kind=canon.kind, name=canon.name, params=canon.params, constraints=canon.constraints, meta=merged_meta) 
++     #     # return CanonicalType(kind=canon.kind, name=canon.name, params=canon.params, constraints=canon.constraints, meta=merged_meta)
 ```
 
 ---
@@ -4194,20 +4194,20 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
       pa = None # Allow type checking
 +     Series = None
 +     DataFrame = None
-  
+
   from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
-  
+
   class PanderaTypeSystem(TypeSystem):
 -     """Type system implementation for Pandera data types."""
 +     """Type system implementation for Pandera schemas."""
-  
+
       name = "pandera"
-  
+
       def __init__(self):
           if pa is None:
 -             raise PolitipoError("Pandera is not installed. Cannot initialize PanderaTypeSystem.")
 +             raise PolitipoError("Pandera is not installed.")
-  
+
 -         # Mapping from Pandera type instances/classes to canonical primitive names
 -         # Pandera types are often instances (e.g., pa.Int()), check type mainly
 -         self._to_canonical_map: Dict[Type[pa.DataType], str] = {
@@ -4229,8 +4229,8 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 -         if hasattr(numpy_engine, 'DateTime'):
 -             self._to_canonical_map[numpy_engine.DateTime] = "datetime"
 -         # Add more engine-specific types as needed
-- 
-- 
+-
+-
 -         # Mapping from canonical primitive names to Pandera type classes
 -         self._from_canonical_map: Dict[str, Type[pa.DataType]] = {
 -             "int": pa.Int,
@@ -4246,7 +4246,7 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 -             "any": pa.Object,
 -             "null": pa.Object, # Pandera handles nullability separately
 -         }
-- 
+-
 -     @lru_cache(maxsize=128)
 -     def to_canonical(self, type_obj: Type) -> CanonicalType:
 -         """Convert a Pandera type to CanonicalType."""
@@ -4254,12 +4254,12 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 -         if isinstance(type_obj, type) and hasattr(type_obj, '__pandera_schema__'):
 -             fields = {}
 -             schema = type_obj.__pandera_schema__
--             
+-
 -             # Extract field information
 -             for name, field in schema.fields.items():
 -                 field_type = field.dtype
 -                 field_constraints = {}
--                 
+-
 -                 # Map constraints
 -                 if field.nullable is not None:
 -                     field_constraints['nullable'] = field.nullable
@@ -4267,14 +4267,14 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 -                     field_constraints['unique'] = True
 -                 if field.coerce:
 -                     field_constraints['coerce'] = True
--                 
+-
 -                 # Add field to fields dict
 -                 fields[name] = {
 -                     "type": self._map_pandera_type(field_type),
 -                     "constraints": field_constraints,
 -                     "required": not field.nullable
 -                 }
--             
+-
 +     def get_default_canonical(self) -> CanonicalType:
 +         """Returns a generic DataFrame schema type."""
           return CanonicalType(
@@ -4289,7 +4289,7 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +                 "schema_type": "dataframe"
               })
           )
-  
+
 -         # Handle basic Pandera types
 -         if hasattr(type_obj, '__pandera_base__'):
 -             base_type = type_obj.__pandera_base__
@@ -4302,17 +4302,17 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +         """Converts a Pandera schema to CanonicalType."""
 +         if not self.detect(type_obj):
 +             raise ConversionError(f"Object {type_obj} is not a Pandera schema.")
-+ 
++
 +         # Handle Series schema
 +         if isinstance(type_obj, pa.SeriesSchema):
 +             return self._series_to_canonical(type_obj)
-+ 
++
 +         # Handle DataFrame schema
 +         if isinstance(type_obj, pa.DataFrameSchema):
 +             return self._dataframe_to_canonical(type_obj)
-+ 
++
 +         raise ConversionError(f"Unsupported Pandera schema type: {type(type_obj)}")
-+ 
++
 +     def _series_to_canonical(self, schema: pa.SeriesSchema) -> CanonicalType:
 +         """Convert a SeriesSchema to CanonicalType."""
 +         # Extract constraints
@@ -4327,26 +4327,26 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +             constraints["regex"] = schema.regex
 +         if schema.checks:
 +             constraints["checks"] = [str(check) for check in schema.checks]
-+ 
++
 +         # Extract dtype info
 +         dtype_name = str(schema.dtype) if schema.dtype else "object"
-+ 
++
 +         # Build metadata
 +         meta_data = {
               "origin_system": self.name,
 -                     "pandera_type": str(type_obj)
 -                 })
 -             )
--         
+-
 -         # Fallback for unknown types
 +             "schema_type": "series",
 +             "pandas_dtype": dtype_name
 +         }
-+ 
++
 +         # Add any custom metadata from schema
 +         if hasattr(schema, "metadata") and schema.metadata:
 +             meta_data["custom_metadata"] = schema.metadata
-+ 
++
           return CanonicalType(
               kind="primitive",
 -             name="any",
@@ -4355,23 +4355,23 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +             constraints=constraints,
 +             meta=TypeMeta(data=meta_data)
 +         )
-+ 
++
 +     def _dataframe_to_canonical(self, schema: pa.DataFrameSchema) -> CanonicalType:
 +         """Convert a DataFrameSchema to CanonicalType."""
 +         fields: Dict[str, Dict] = {}
-+ 
++
 +         # Process each column
 +         for name, column in schema.columns.items():
 +             # Convert column schema to canonical type
 +             column_canon = self._series_to_canonical(column.schema)
-+ 
++
 +             # Add field entry with type and constraints
 +             fields[name] = {
 +                 "type": column_canon,
 +                 "required": not column.nullable if column.nullable is not None else True,
 +                 "constraints": {}
 +             }
-+ 
++
 +             # Add column-specific constraints
 +             if column.unique is not None:
 +                 fields[name]["constraints"]["unique"] = column.unique
@@ -4381,7 +4381,7 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +                 fields[name]["constraints"]["regex"] = column.regex
 +             if column.checks:
 +                 fields[name]["constraints"]["checks"] = [str(check) for check in column.checks]
-+ 
++
 +         # Build metadata
 +         meta_data = {
               "origin_system": self.name,
@@ -4389,14 +4389,14 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 -             })
 +             "schema_type": "dataframe",
 +         }
-+ 
++
 +         # Add index information if present
 +         if schema.index:
 +             meta_data["index"] = {
 +                 "names": schema.index.names if isinstance(schema.index, list) else [schema.index.name],
 +                 "dtypes": [str(idx.dtype) for idx in (schema.index if isinstance(schema.index, list) else [schema.index])]
 +             }
-+ 
++
 +         # Add DataFrame-level constraints
 +         if schema.unique_column_names is not None:
 +             meta_data["unique_column_names"] = schema.unique_column_names
@@ -4406,19 +4406,19 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +             meta_data["strict"] = schema.strict
 +         if schema.ordered is not None:
 +             meta_data["ordered"] = schema.ordered
-+ 
++
 +         # Add any custom metadata from schema
 +         if hasattr(schema, "metadata") and schema.metadata:
 +             meta_data["custom_metadata"] = schema.metadata
-+ 
++
 +         return CanonicalType(
 +             kind="composite",
 +             name="DataFrameSchema",
 +             params={"fields": fields},
 +             meta=TypeMeta(data=meta_data)
           )
-- 
-  
+-
+
       @lru_cache(maxsize=128)
 -     def from_canonical(self, canonical: CanonicalType) -> pa.DataType:
 -         """Reconstructs a Pandera type from CanonicalType, including constraints."""
@@ -4426,29 +4426,29 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +         """Reconstruct a Pandera schema from CanonicalType."""
 +         if pa is None:
 +             raise PolitipoError("Pandera is not installed.")
-+ 
++
 +         meta = canonical.meta.data if canonical.meta else {}
 +         schema_type = meta.get("schema_type")
-+ 
++
 +         if schema_type == "series":
 +             return self._canonical_to_series(canonical)
 +         elif schema_type == "dataframe":
 +             return self._canonical_to_dataframe(canonical)
 +         else:
 +             raise ConversionError(f"Unsupported schema type in canonical: {schema_type}")
-+ 
++
 +     def _canonical_to_series(self, canonical: CanonicalType) -> pa.SeriesSchema:
 +         """Convert CanonicalType to SeriesSchema."""
           if canonical.kind != "primitive":
 -              # Pandera focuses on primitive-like column types
 -              # raise ConversionError(f"Cannot convert non-primitive CanonicalType '{canonical.kind}:{canonical.name}' to Pandera type")
 -              return pa.Object() # Fallback
-- 
+-
 -         if canonical.name in self._from_canonical_map:
 -             base_pa_type_class = self._from_canonical_map[canonical.name]
 -             # Instantiate the Pandera DataType
 -             pa_type_instance = base_pa_type_class()
-- 
+-
 -             # Convert canonical constraints back to Pandera Checks
 -             checks = []
 -             for constraint_name, constraint_obj in canonical.constraints.items():
@@ -4456,10 +4456,10 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 -                 if check:
 -                     checks.append(check)
 +             raise ConversionError("Series canonical type must be primitive")
-+ 
++
 +         meta = canonical.meta.data if canonical.meta else {}
 +         constraints = canonical.constraints or {}
-+ 
++
 +         # Create series schema
 +         return pa.SeriesSchema(
 +             dtype=meta.get("pandas_dtype", "object"),
@@ -4470,24 +4470,24 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +             checks=None,  # Complex to reconstruct checks
 +             metadata=meta.get("custom_metadata")
 +         )
-+ 
++
 +     def _canonical_to_dataframe(self, canonical: CanonicalType) -> pa.DataFrameSchema:
 +         """Convert CanonicalType to DataFrameSchema."""
 +         if canonical.kind != "composite":
 +             raise ConversionError("DataFrame canonical type must be composite")
-+ 
++
 +         meta = canonical.meta.data if canonical.meta else {}
 +         fields = canonical.params.get("fields", {})
-+ 
++
 +         # Convert fields to column schemas
 +         columns = {}
 +         for name, field_info in fields.items():
 +             field_type = field_info["type"]
 +             field_constraints = field_info.get("constraints", {})
-+ 
++
 +             # Convert field to series schema
 +             series_schema = self._canonical_to_series(field_type)
-  
+
 -             # Add checks to the instantiated type if Pandera allows modification or re-instantiation
 -             # Option 1: Re-instantiate with checks if constructor allows
 -             # try:
@@ -4497,14 +4497,14 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 -             #     # Fallback if checks cannot be passed at init
 -             #     pa_type_instance._checks = checks # Modify internal? Risky.
 -             #     return pa_type_instance
-- 
+-
 -             # Option 2: Add checks after instantiation (if supported)
 -             # Pandera types are often immutable after creation, this might not work.
 -             # Let's assume we need to pass checks during construction if possible.
 -             # For now, return the instance without reapplied checks if init fails.
 -             # This requires Pandera type constructors to potentially accept checks.
 -             # If not, conversion back isn't fully possible this way.
-- 
+-
 -             # Safest: Return the base type instance, constraints are handled at Column level
 -             return pa_type_instance
 -         else:
@@ -4518,7 +4518,7 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +                 regex=field_constraints.get("regex"),
 +                 checks=None  # Complex to reconstruct checks
 +             )
-+ 
++
 +         # Create DataFrame schema
 +         return pa.DataFrameSchema(
 +             columns=columns,
@@ -4529,20 +4529,20 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +             ordered=meta.get("ordered"),
 +             metadata=meta.get("custom_metadata")
 +         )
-+ 
++
 +     def _build_index_from_meta(self, index_meta: Optional[Dict]) -> Optional[Union[pa.Index, list]]:
 +         """Helper to reconstruct index schema from metadata."""
 +         if not index_meta:
 +             return None
-+ 
++
 +         names = index_meta.get("names", [])
 +         dtypes = index_meta.get("dtypes", [])
-+ 
++
 +         if len(names) == 1:
 +             return pa.Index(dtype=dtypes[0], name=names[0])
-+         
++
 +         return [pa.Index(dtype=dtype, name=name) for name, dtype in zip(names, dtypes)]
-  
+
       def detect(self, obj: Any) -> bool:
 -         """Returns True if the object is a Pandera DataType."""
 -         if pa is None: return False
@@ -4554,7 +4554,7 @@ Now let's move on to Task 3, updating the Pandera plugin to properly handle Data
 +             pa is not None and
 +             isinstance(obj, (pa.DataFrameSchema, pa.SeriesSchema))
           )
-  
+
 ```
 
 ---
@@ -4841,11 +4841,11 @@ Now let's create the `__init__.py` file in the utils directory:
 ---
 
 ```diff
-- 
+-
 + """Utilities for the conversion core."""
 + from .instantiation import create_model_instance_from_dict
-+ 
-+ __all__ = ["create_model_instance_from_dict"] 
++
++ __all__ = ["create_model_instance_from_dict"]
 ```
 
 ---
@@ -4855,14 +4855,14 @@ Next, let's create the instantiation utility file:
 ---
 
 ```diff
-- 
+-
 + """Utilities for model instantiation."""
 + from typing import Any, Dict, Type
-+ 
++
 + from politipo.core.errors import ConversionError
 + from politipo.core.utils.pydantic import get_pydantic_version
-+ 
-+ 
++
++
 + def create_model_instance_from_dict(
 +     model_class: Type,
 +     data: Dict[str, Any],
@@ -4870,19 +4870,19 @@ Next, let's create the instantiation utility file:
 + ) -> Any:
 +     """
 +     Creates a Pydantic/SQLModel instance from dictionary data.
-+ 
++
 +     Handles Pydantic v1/v2 differences and strict/non-strict modes.
-+ 
++
 +     Args:
 +         model_class: The target model class (e.g., Pydantic BaseModel).
 +         data: The dictionary containing data for the model.
 +         strict: If True, performs full validation. If False, attempts
 +                 faster creation (e.g., model_construct) and filters
 +                 extraneous data.
-+ 
++
 +     Returns:
 +         An instance of the model_class.
-+ 
++
 +     Raises:
 +         ConversionError: If instantiation fails, especially in strict mode
 +                         or if non-strict fallback also fails.
@@ -4910,7 +4910,7 @@ Next, let's create the instantiation utility file:
 +                 valid_field_names = getattr(model_class, '__fields__', {}).keys()
 +                 filtered_data = {k: v for k, v in data.items() if k in valid_field_names}
 +                 return model_class(**filtered_data)
-+ 
++
 +     except Exception as e:
 +         # This block might become less necessary with model_construct/filtering above,
 +         # but keep as a final safety net if direct **kwargs fails in v1 non-strict.
@@ -4919,7 +4919,7 @@ Next, let's create the instantiation utility file:
 +             raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}") from e
 +         else:
 +             # If even filtering + construction failed in non-strict, raise with context
-+             raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e 
++             raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e
 ```
 
 ---
@@ -4930,7 +4930,7 @@ Now let's update each of the strategy files to use this centralized utility. Fir
 
 <details>
             <summary>Searched codebase "Find the dict_to_model.py, pandas_to_model_list.py, and polars_to_list.py files in the strategies directory" • **21** results</summary>
-        
+
 | File | Lines |
 |------|-------|
 | `politipo/core/conversion/strategies/__init__.py` | L1-15 |
@@ -4967,8 +4967,8 @@ Now let's update each of the strategy files to use our centralized utility. Let'
   from politipo.core.conversion.strategies.base import ConversionStrategy
   from politipo.core.utils.pydantic import get_pydantic_version
 + from politipo.core.conversion.utils import create_model_instance_from_dict
-  
-  
+
+
           # Convert dict to model instance
           try:
 -             return self._create_model_instance(model_class, value, context.strict)
@@ -4987,8 +4987,8 @@ Now let's update `pandas_to_model_list.py`:
   from politipo.core.conversion.strategies.base import ConversionStrategy
   from politipo.core.utils.pydantic import get_pydantic_version
 + from politipo.core.conversion.utils import create_model_instance_from_dict
-  
-  
+
+
           try:
               return [
 -                 self._create_model_instance(model_class, record, context.strict)
@@ -5007,8 +5007,8 @@ Finally, let's update `polars_to_list.py`:
   from politipo.core.conversion.strategies.base import ConversionStrategy
   from politipo.core.utils.pydantic import get_pydantic_version
 + from politipo.core.conversion.utils import create_model_instance_from_dict
-  
-  
+
+
           try:
               return [
 -                 self._create_model_instance(model_class, record, context.strict)
@@ -5406,7 +5406,7 @@ I'll help implement these tasks, starting with Task 1.1: Implementing `from_cano
 
 <details>
             <summary>Searched codebase "Find the PydanticTypeSystem class implementation in the pydantic plugin" • **16** results</summary>
-        
+
 | File | Lines |
 |------|-------|
 | `politipo/plugins/pydantic/types.py` | L151-196 |
@@ -5438,7 +5438,7 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
       @lru_cache(maxsize=128)
       def from_canonical(self, canonical: CanonicalType) -> Type:
 -         """Reconstructs a Pydantic type or model from CanonicalType."""
-- 
+-
 -         # Handle Pydantic Model reconstruction from full schema if available
 -         if canonical.kind == "composite" and "json_schema_str" in canonical.params:
 -             try:
@@ -5448,16 +5448,16 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 -             except Exception:
 -                  # Fallback to field-based reconstruction if schema fails
 -                  pass # Continue to logic below
-- 
+-
 +         """
 +         Reconstructs a Pydantic type or model from CanonicalType.
-+ 
++
 +         Args:
 +             canonical: The canonical type representation to convert.
-+ 
++
 +         Returns:
 +             A Pydantic type (for primitives/containers) or model class (for composites).
-+ 
++
 +         Raises:
 +             ConversionError: If reconstruction fails or required data is missing.
 +         """
@@ -5470,7 +5470,7 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 +             fields_info = canonical.params.get("fields")
 +             if not fields_info:
 +                 raise ConversionError(f"Cannot reconstruct Pydantic model '{canonical.name}' without field definitions.")
-  
+
 -             for name, field_info in field_params.items():
 +             fields_for_create_model = {}
 +             for name, field_info in fields_info.items():
@@ -5478,22 +5478,22 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 +                     # Get field type
                       field_type_canonical = field_info["type"]
                       py_type = self._canonical_to_pydantic_type(field_type_canonical)
-  
+
 +                     # Get constraints and convert to field kwargs
                       constraints = field_info.get("constraints", {})
                       field_kwargs = self._constraints_to_field_kwargs(constraints)
-  
+
 -                 if 'description' in field_info:
 +                     # Add description if present
 +                     if field_info.get('description'):
                           field_kwargs['description'] = field_info['description']
-  
+
 -                 # Handle optional vs required
 -                 is_required = field_info.get("required", True)
 +                     # Handle required/optional and defaults
 +                     is_required = field_info.get('required', True)
 +                     default_value = field_info.get('default', ...)
-+ 
++
                       if is_required:
 -                     # Field(...) implies required unless default is set
 -                     if not field_kwargs:
@@ -5509,12 +5509,12 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 +                         # Use canonical default if provided, otherwise default optional fields to None
 +                         final_default = default_value if default_value is not ... else None
 +                         field_definition = Field(default=final_default, **field_kwargs)
-+ 
++
 +                     fields_for_create_model[name] = (py_type, field_definition)
-+ 
++
 +                 except Exception as e:
 +                     raise ConversionError(f"Error processing field '{name}' for Pydantic model '{canonical.name}': {e}") from e
-+ 
++
 +             # Handle Model Config
 +             config_dict = canonical.meta.get('pydantic_config') if canonical.meta else None
 +             config_kwarg = {}
@@ -5530,11 +5530,11 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 -                     # Set default to None unless another default exists in kwargs
 -                     field_kwargs.setdefault('default', None)
 -                     fields_def[name] = (py_type, Field(**field_kwargs))
-- 
+-
 -             return create_model(canonical.name, **fields_def)
 +                     # For v1, create Config class
 +                     config_kwarg['__config__'] = type('Config', (), config_dict)
-+ 
++
 +             try:
 +                 # Create the model
 +                 model = create_model(
@@ -5548,12 +5548,12 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 +                 return model
 +             except Exception as e:
 +                 raise ConversionError(f"Failed to create Pydantic model '{canonical.name}': {e}") from e
-  
+
           # Handle Container Types
           if canonical.kind == "container":
 -             container_map: Dict[str, Type] = {"list": List, "tuple": Tuple, "set": Set, "frozenset": FrozenSet, "dict": Dict}
 +             container_map: Dict[str, Type] = {
-+                 "list": List, "tuple": Tuple, "set": Set, 
++                 "list": List, "tuple": Tuple, "set": Set,
 +                 "frozenset": FrozenSet, "dict": Dict
 +             }
               if canonical.name in container_map:
@@ -5562,12 +5562,12 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 -                     key_type = self._canonical_to_pydantic_type(canonical.params.get("key_type", CanonicalType(kind="primitive", name="any")))
 -                     value_type = self._canonical_to_pydantic_type(canonical.params.get("value_type", CanonicalType(kind="primitive", name="any")))
 +                     key_type = self._canonical_to_pydantic_type(
-+                         canonical.params.get("key_type", 
++                         canonical.params.get("key_type",
 +                             CanonicalType(kind="primitive", name="any")
 +                         )
 +                     )
 +                     value_type = self._canonical_to_pydantic_type(
-+                         canonical.params.get("value_type", 
++                         canonical.params.get("value_type",
 +                             CanonicalType(kind="primitive", name="any")
 +                         )
 +                     )
@@ -5575,15 +5575,15 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
                   else:
 -                     item_type = self._canonical_to_pydantic_type(canonical.params.get("item_type", CanonicalType(kind="primitive", name="any")))
 +                     item_type = self._canonical_to_pydantic_type(
-+                         canonical.params.get("item_type", 
++                         canonical.params.get("item_type",
 +                             CanonicalType(kind="primitive", name="any")
 +                         )
 +                     )
                       return container[item_type]
-  
+
                    kwargs[kwarg_name] = value
           return kwargs
-- 
+-
 -     # Helper similar to TypeMapper's - needed for schema reconstruction
 -     def _create_model_from_schema(self, model_name: str, schema: Dict) -> Type[BaseModel]:
 -          """Creates a Pydantic model from a JSON schema dictionary."""
@@ -5608,7 +5608,7 @@ I see that the `PydanticTypeSystem` already has a fairly complete implementation
 -              is_req = name in required
 -              default = ... if is_req else prop_schema.get('default', None)
 -              fields_from_schema[name] = (py_type, default)
-- 
+-
 -          if not fields_from_schema: # Create dummy if parse failed
 -               return create_model(model_name, __config__=None, dummy_field=(Any, None))
 -          else:
@@ -5720,7 +5720,7 @@ I'll help implement the `from_canonical` method for SQLAlchemy models. First, le
 
 <details>
             <summary>Searched codebase "class SQLAlchemyTypeSystem" • **0** results</summary>
-        
+
 No results found
 </details>
 
@@ -5732,7 +5732,7 @@ Let me check the SQLAlchemy model types implementation:
 
 <details>
             <summary>Searched codebase "class SQLAlchemyModelTypeSystem" • **0** results</summary>
-        
+
 No results found
 </details>
 
@@ -5756,7 +5756,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 + from typing import Any, Dict, Type, Optional, List
   from functools import lru_cache
 + import inspect
-  
+
   try:
 -     from sqlalchemy.orm import DeclarativeBase, RelationshipProperty
 -     from sqlalchemy.inspection import inspect as sqlalchemy_inspect
@@ -5769,19 +5769,19 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 -     RelationshipProperty = None
 -     sqlalchemy_inspect = None
 +     Column = Table = MetaData = DeclarativeMeta = Mapped = mapped_column = registry = SchemaItem = None
-  
+
   from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
 - from .types import SQLAlchemyTypeSystem
-- 
+-
 + from politipo.plugins.sqlalchemy.types import SQLAlchemyTypeSystem
-  
+
   class SQLAlchemyModelTypeSystem(TypeSystem):
 -     """Type system implementation for SQLAlchemy declarative models (table structures)."""
 +     """Type system implementation for SQLAlchemy declarative models."""
-  
+
       name = "sqlalchemy_model"
-  
+
       def __init__(self):
 -         if DeclarativeBase is None:
 -             raise PolitipoError("SQLAlchemy is not installed or version mismatch.")
@@ -5791,7 +5791,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +             raise PolitipoError("SQLAlchemy is not installed. Cannot initialize SQLAlchemyModelTypeSystem.")
 +         # Use SQLAlchemyTypeSystem for handling column types
 +         self._type_system = SQLAlchemyTypeSystem()
-  
+
       def get_default_canonical(self) -> CanonicalType:
 -         """Returns a generic SQLAlchemy Model type."""
 +         """Returns a generic model type as the default target."""
@@ -5802,7 +5802,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
               params={"fields": {}},
               meta=TypeMeta(data={"origin_system": self.name})
           )
-  
+
 -     @lru_cache(maxsize=64)
 +     @lru_cache(maxsize=128)
       def to_canonical(self, type_obj: Type) -> CanonicalType:
@@ -5811,7 +5811,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
           if not self.detect(type_obj):
 -             raise ConversionError(f"Object {type_obj} is not a recognized SQLAlchemy declarative model class.")
 +             raise ConversionError(f"Type {type_obj} is not a SQLAlchemy declarative model")
-  
+
 -         try:
 -             mapper = sqlalchemy_inspect(type_obj)
 -             table = mapper.local_table
@@ -5821,10 +5821,10 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +         table = getattr(type_obj, '__table__', None)
 +         if not table:
 +             raise ConversionError(f"Model {type_obj} has no __table__ attribute")
-  
+
 -         fields = {}
 -         pk_col_names = set(pk_col.name for pk_col in table.primary_key.columns)
-- 
+-
 -         for col in table.columns:
 -             # Get column type canonical representation
 -             try:
@@ -5837,7 +5837,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 -                     name="any",
 -                     meta=TypeMeta(data={"error": str(e)})
 -                 )
-- 
+-
 -             # Add primary key info to column type meta if applicable
 -             is_pk = col.name in pk_col_names
 -             if is_pk:
@@ -5852,7 +5852,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 -                     constraints=canonical_col_type.constraints,
 -                     meta=TypeMeta(data=col_meta_data)
 -                 )
-- 
+-
 -             # Handle default - this can be complex (scalar, SQL func, Python func)
 -             default_value_repr = ...  # Ellipsis for no default
 -             if col.default is not None:
@@ -5861,7 +5861,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 -                     default_value_repr = col.default.arg
 -                 # TODO: Handle SQL functions, Python callables etc. - complex
 -                 # else: default_value_repr = f"SQLDefault({col.default})"
-- 
+-
 -             # Use standard field structure
 -             fields[col.name] = {
 -                 "type": canonical_col_type,
@@ -5873,7 +5873,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +             # Get column type
 +             column_type = column.type
 +             type_canonical = self._type_system.to_canonical(column_type)
-+ 
++
 +             # Extract constraints
 +             constraints = {}
 +             if column.primary_key:
@@ -5890,13 +5890,13 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +                         'column': fk.column.name
 +                     })
 +                 constraints['foreign_keys'] = fk_list
-+ 
++
 +             # Get default value if any
 +             default_value = ...  # Ellipsis represents no default
 +             if column.default is not None:
 +                 if column.default.is_scalar:
 +                     default_value = column.default.arg
-+ 
++
 +             fields_canonical[name] = {
 +                 "type": type_canonical,
 +                 "constraints": constraints,
@@ -5904,7 +5904,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +                 "default": default_value,
 +                 "description": getattr(column, 'doc', None),
               }
-  
+
 -         # Extract table metadata
 -         meta_data = {
 +         # Extract model metadata
@@ -5917,7 +5917,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 -             "sql_relationships": {},  # Placeholder for relationship info
 -             "description": inspect.getdoc(type_obj),
 -         }
-- 
+-
 -         # Extract basic relationship info (complex details deferred)
 -         try:
 -             for name, prop in mapper.relationships.items():
@@ -5932,12 +5932,12 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +             "table_name": table.name,
 +             "schema": table.schema,
 +         }
-+ 
++
 +         # Add model docstring if available
 +         model_description = inspect.getdoc(type_obj)
 +         if model_description:
 +             model_meta["description"] = model_description
-+ 
++
 +         # Add relationships if available
 +         relationships = {}
 +         for name, rel in inspect.getmembers(type_obj):
@@ -5948,7 +5948,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +                 }
 +         if relationships:
 +             model_meta["relationships"] = relationships
-  
+
           return CanonicalType(
               kind="composite",
               name=type_obj.__name__,
@@ -5957,7 +5957,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +             params={"fields": fields_canonical},
 +             meta=TypeMeta(data=model_meta)
           )
-  
+
 -     @lru_cache(maxsize=64)
 +     @lru_cache(maxsize=128)
       def from_canonical(self, canonical: CanonicalType) -> Type:
@@ -5965,27 +5965,27 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 -         raise NotImplementedError("Dynamic SQLAlchemy model reconstruction from CanonicalType is complex and not yet supported.")
 +         """
 +         Reconstructs a SQLAlchemy declarative model from CanonicalType.
-+ 
++
 +         Args:
 +             canonical: The canonical type representation to convert.
-+ 
++
 +         Returns:
 +             A SQLAlchemy declarative model class.
-+ 
++
 +         Raises:
 +             ConversionError: If reconstruction fails or required data is missing.
 +         """
 +         if canonical.kind != "composite":
 +             raise ConversionError(f"Cannot create SQLAlchemy model from non-composite type: {canonical.kind}")
-+ 
++
 +         fields_info = canonical.params.get("fields")
 +         if not fields_info:
 +             raise ConversionError(f"Cannot reconstruct SQLAlchemy model '{canonical.name}' without field definitions")
-+ 
++
 +         # Create registry for declarative models
 +         mapper_registry = registry()
 +         Base = mapper_registry.generate_base()
-+ 
++
 +         # Prepare columns for model
 +         columns = {}
 +         for name, field_info in fields_info.items():
@@ -5993,10 +5993,10 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +                 # Get SQLAlchemy type for the field
 +                 field_type_canonical = field_info["type"]
 +                 sa_type = self._type_system.from_canonical(field_type_canonical)
-+ 
++
 +                 # Prepare column kwargs
 +                 column_kwargs = {}
-+ 
++
 +                 # Handle constraints
 +                 constraints = field_info.get("constraints", {})
 +                 if constraints.get("primary_key"):
@@ -6005,7 +6005,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +                     column_kwargs["nullable"] = True
 +                 if constraints.get("unique"):
 +                     column_kwargs["unique"] = True
-+ 
++
 +                 # Handle foreign keys
 +                 if "foreign_keys" in constraints:
 +                     fk_list = []
@@ -6013,43 +6013,43 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +                         fk_list.append(f"{fk['table']}.{fk['column']}")
 +                     if fk_list:
 +                         column_kwargs["foreign_keys"] = fk_list
-+ 
++
 +                 # Handle default value
 +                 default_value = field_info.get("default", ...)
 +                 if default_value is not ...:
 +                     column_kwargs["default"] = default_value
-+ 
++
 +                 # Add description/comment if available
 +                 if field_info.get("description"):
 +                     column_kwargs["comment"] = field_info["description"]
-+ 
++
 +                 # Create column
 +                 columns[name] = Column(sa_type, **column_kwargs)
-+ 
++
 +             except Exception as e:
 +                 raise ConversionError(f"Error creating column '{name}' for model '{canonical.name}': {e}") from e
-+ 
++
 +         # Get table name and schema from metadata
 +         table_name = canonical.meta.get("table_name", canonical.name.lower())
 +         schema = canonical.meta.get("schema")
-+ 
++
 +         # Create model class
 +         model_attrs = {
 +             "__tablename__": table_name,
 +             "__table_args__": {"schema": schema} if schema else {},
 +             **columns
 +         }
-+ 
++
 +         # Add docstring if available
 +         if canonical.meta and canonical.meta.get("description"):
 +             model_attrs["__doc__"] = canonical.meta["description"]
-+ 
++
 +         try:
 +             model = type(canonical.name, (Base,), model_attrs)
 +             return model
 +         except Exception as e:
 +             raise ConversionError(f"Failed to create SQLAlchemy model '{canonical.name}': {e}") from e
-  
+
       def detect(self, obj: Any) -> bool:
 -         """Returns True if obj is a SQLAlchemy declarative model class."""
 -         # Need robust check, isinstance(obj, type) and having __table__ is a good start
@@ -6057,7 +6057,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 +         """Returns True if the object is a SQLAlchemy declarative model class."""
 +         if DeclarativeMeta is None:
 +             return False
-+ 
++
           return (
 -             DeclarativeBase is not None and
               isinstance(obj, type) and
@@ -6066,7 +6066,7 @@ I'll now implement the `SQLAlchemyModelTypeSystem` class for handling SQLAlchemy
 -             obj is not DeclarativeBase  # Don't detect the base itself
 +             isinstance(getattr(obj, '__class__', None), DeclarativeMeta) and
 +             hasattr(obj, '__table__')
-          ) 
+          )
 ```
 
 ---
@@ -6079,13 +6079,13 @@ Now I'll update the SQLAlchemy plugin's `__init__.py` to expose the new type sys
       from .types import SQLAlchemyTypeSystem
       from .model_types import SQLAlchemyModelTypeSystem
 -     __all__ = ["SQLAlchemyTypeSystem", "SQLAlchemyModelTypeSystem"]
-+ 
++
 +     __all__ = ['SQLAlchemyTypeSystem', 'SQLAlchemyModelTypeSystem']
   except ImportError:
 -      # Allow importing __init__ even if sqlalchemy isn't installed
--     __all__ = [] 
+-     __all__ = []
 +     # Allow import to succeed even if SQLAlchemy is not installed
-+     pass 
++     pass
 ```
 
 ---
@@ -6097,13 +6097,13 @@ Finally, I'll update the main `__init__.py` to expose the new type system:
 ```diff
 - """Politipo: Type Harmony for Python."""
 + """Politipo: Type conversion and validation for data models."""
-  
+
 + # Core components
 + from politipo.core.types import CanonicalType, TypeMeta
   from politipo.core.conversion import ConversionEngine
 - from politipo.core.types import TypeSystem, CanonicalType
   from politipo.core.errors import ConversionError, PolitipoError
-  
+
   # Plugin type systems
   from politipo.plugins.python import PythonTypeSystem
   from politipo.plugins.pydantic import PydanticTypeSystem
@@ -6114,7 +6114,7 @@ Finally, I'll update the main `__init__.py` to expose the new type system:
 + from politipo.plugins.pandas import PandasTypeSystem
 + from politipo.plugins.polars import PolarsTypeSystem
   from politipo.plugins.pandera import PanderaTypeSystem
-  
+
   __all__ = [
 -     # Core components
 -     "ConversionEngine",
@@ -6122,7 +6122,7 @@ Finally, I'll update the main `__init__.py` to expose the new type system:
 -     "CanonicalType",
 -     "ConversionError",
 -     "PolitipoError",
--     
+-
 -     # Type systems
 -     "PythonTypeSystem",
 -     "PydanticTypeSystem",
@@ -6201,7 +6201,7 @@ I'll help implement Task 1.3 (Pandera schemas). First, let me check the current 
 
 <details>
             <summary>Searched codebase "class PanderaTypeSystem" • **0** results</summary>
-        
+
 No results found
 </details>
 
@@ -6234,42 +6234,42 @@ I'll update the Pandera type system to better handle schema objects and standard
 +     pa = None
       Series = None
       DataFrame = None
-  
+
       @lru_cache(maxsize=128)
 -     def to_canonical(self, type_obj: Union[pa.DataFrameSchema, pa.SeriesSchema]) -> CanonicalType:
 -         """Converts a Pandera schema to CanonicalType."""
 +     def to_canonical(self, type_obj: Union[pa.DataFrameSchema, pa.SeriesSchema, Type[DataFrame], Type[Series]]) -> CanonicalType:
 +         """
 +         Converts a Pandera schema or type to CanonicalType.
-+         
++
 +         Args:
 +             type_obj: A Pandera schema object (DataFrameSchema/SeriesSchema) or type annotation (DataFrame/Series)
-+             
++
 +         Returns:
 +             CanonicalType representation of the schema
-+             
++
 +         Raises:
 +             ConversionError: If the object is not a supported Pandera type
 +         """
           if not self.detect(type_obj):
 -             raise ConversionError(f"Object {type_obj} is not a Pandera schema.")
 +             raise ConversionError(f"Object {type_obj} is not a Pandera schema or type.")
-  
+
 -         # Handle Series schema
 -         if isinstance(type_obj, pa.SeriesSchema):
 +         # Handle Series schema and type
 +         if isinstance(type_obj, pa.SeriesSchema) or (isinstance(type_obj, type) and issubclass(type_obj, Series)):
               return self._series_to_canonical(type_obj)
-  
+
 -         # Handle DataFrame schema
 -         if isinstance(type_obj, pa.DataFrameSchema):
 +         # Handle DataFrame schema and type
 +         if isinstance(type_obj, pa.DataFrameSchema) or (isinstance(type_obj, type) and issubclass(type_obj, DataFrame)):
               return self._dataframe_to_canonical(type_obj)
-  
+
 -         raise ConversionError(f"Unsupported Pandera schema type: {type(type_obj)}")
 +         raise ConversionError(f"Unsupported Pandera type: {type(type_obj)}")
-  
+
 -     def _series_to_canonical(self, schema: pa.SeriesSchema) -> CanonicalType:
 -         """Convert a SeriesSchema to CanonicalType."""
 +     def _series_to_canonical(self, schema: Union[pa.SeriesSchema, Type[Series]]) -> CanonicalType:
@@ -6277,10 +6277,10 @@ I'll update the Pandera type system to better handle schema objects and standard
 +         # Extract schema from Series type if needed
 +         if isinstance(schema, type) and issubclass(schema, Series):
 +             schema = getattr(schema, "__schema__", pa.SeriesSchema())
-+ 
++
           # Extract constraints
           constraints = {}
-+         
++
 +         # Basic constraints
           if schema.nullable is not None:
               constraints["nullable"] = schema.nullable
@@ -6288,7 +6288,7 @@ I'll update the Pandera type system to better handle schema objects and standard
           if schema.regex is not None:
 -             constraints["regex"] = schema.regex
 +             constraints["pattern"] = schema.regex
-+ 
++
 +         # Validation checks
           if schema.checks:
 -             constraints["checks"] = [str(check) for check in schema.checks]
@@ -6296,15 +6296,15 @@ I'll update the Pandera type system to better handle schema objects and standard
 +                 constraint = self._pandera_check_to_constraint(check)
 +                 if constraint:
 +                     constraints.update(constraint.to_dict())
-  
+
           # Extract dtype info
           }
-  
+
 -         # Add any custom metadata from schema
 +         # Add any custom metadata
           if hasattr(schema, "metadata") and schema.metadata:
               meta_data["custom_metadata"] = schema.metadata
-  
+
           return CanonicalType(
               kind="primitive",
 -             name=dtype_name,
@@ -6312,7 +6312,7 @@ I'll update the Pandera type system to better handle schema objects and standard
               constraints=constraints,
               meta=TypeMeta(data=meta_data)
           )
-  
+
 -     def _dataframe_to_canonical(self, schema: pa.DataFrameSchema) -> CanonicalType:
 -         """Convert a DataFrameSchema to CanonicalType."""
 +     def _dataframe_to_canonical(self, schema: Union[pa.DataFrameSchema, Type[DataFrame]]) -> CanonicalType:
@@ -6320,15 +6320,15 @@ I'll update the Pandera type system to better handle schema objects and standard
 +         # Extract schema from DataFrame type if needed
 +         if isinstance(schema, type) and issubclass(schema, DataFrame):
 +             schema = getattr(schema, "__schema__", pa.DataFrameSchema())
-+ 
++
           fields: Dict[str, Dict] = {}
-  
+
               column_canon = self._series_to_canonical(column.schema)
-  
+
 -             # Add field entry with type and constraints
 +             # Extract field constraints
 +             field_constraints = {}
-+             
++
 +             # Basic constraints
 +             if column.nullable is not None:
 +                 field_constraints["nullable"] = column.nullable
@@ -6338,21 +6338,21 @@ I'll update the Pandera type system to better handle schema objects and standard
 +                 field_constraints["coerce"] = column.coerce
 +             if column.regex is not None:
 +                 field_constraints["pattern"] = column.regex
-+ 
++
 +             # Validation checks
 +             if column.checks:
 +                 for check in column.checks:
 +                     constraint = self._pandera_check_to_constraint(check)
 +                     if constraint:
 +                         field_constraints.update(constraint.to_dict())
-+ 
++
 +             # Add field entry
               fields[name] = {
                   "type": column_canon,
                   "required": not column.nullable if column.nullable is not None else True,
 -                 "constraints": {}
 -             }
-- 
+-
 -             # Add column-specific constraints
 -             if column.unique is not None:
 -                 fields[name]["constraints"]["unique"] = column.unique
@@ -6365,16 +6365,16 @@ I'll update the Pandera type system to better handle schema objects and standard
 +                 "constraints": field_constraints,
 +                 "description": getattr(column, "description", None)
 +             }
-  
+
           # Build metadata
           }
-  
+
 -         # Add index information if present
 +         # Add index information
           if schema.index:
               meta_data["index"] = {
               meta_data["ordered"] = schema.ordered
-  
+
 -         # Add any custom metadata from schema
 +         # Add custom metadata
           if hasattr(schema, "metadata") and schema.metadata:
@@ -6384,20 +6384,20 @@ I'll update the Pandera type system to better handle schema objects and standard
 -         """Reconstruct a Pandera schema from CanonicalType."""
 +         """
 +         Reconstruct a Pandera schema from CanonicalType.
-+         
++
 +         Args:
 +             canonical: The canonical type representation
-+             
++
 +         Returns:
 +             A Pandera schema object (DataFrameSchema or SeriesSchema)
-+             
++
 +         Raises:
 +             ConversionError: If reconstruction fails
 +         """
           if pa is None:
               raise PolitipoError("Pandera is not installed.")
           constraints = canonical.constraints or {}
-  
+
 +         # Convert constraints to checks
 +         checks = []
 +         for constraint_name, constraint_data in constraints.items():
@@ -6408,7 +6408,7 @@ I'll update the Pandera type system to better handle schema objects and standard
 +                 check = self._constraint_to_pandera_check(constraint)
 +                 if check:
 +                     checks.append(check)
-+ 
++
           # Create series schema
           return pa.SeriesSchema(
               unique=constraints.get("unique"),
@@ -6420,7 +6420,7 @@ I'll update the Pandera type system to better handle schema objects and standard
               metadata=meta.get("custom_metadata")
           )
               series_schema = self._canonical_to_series(field_type)
-  
+
 +             # Convert constraints to checks
 +             checks = []
 +             for constraint_name, constraint_data in field_constraints.items():
@@ -6431,7 +6431,7 @@ I'll update the Pandera type system to better handle schema objects and standard
 +                     check = self._constraint_to_pandera_check(constraint)
 +                     if check:
 +                         checks.append(check)
-+ 
++
               # Create column with constraints
               columns[name] = pa.Column(
                   unique=field_constraints.get("unique"),
@@ -6442,14 +6442,14 @@ I'll update the Pandera type system to better handle schema objects and standard
 +                 checks=checks if checks else None,
 +                 description=field_info.get("description")
               )
-  
+
           )
-  
+
 -     def _build_index_from_meta(self, index_meta: Optional[Dict]) -> Optional[Union[pa.Index, list]]:
 +     def _build_index_from_meta(self, index_meta: Optional[Dict]) -> Optional[Union[pa.Index, List[pa.Index]]]:
           """Helper to reconstruct index schema from metadata."""
           if not index_meta:
-  
+
       def detect(self, obj: Any) -> bool:
 -         """Returns True if obj is a Pandera schema."""
 +         """Returns True if obj is a Pandera schema or type."""
@@ -6462,7 +6462,7 @@ I'll update the Pandera type system to better handle schema objects and standard
 +                 (isinstance(obj, type) and issubclass(obj, (Series, DataFrame)))
 +             )
 +         )
-+ 
++
 +     def _map_dtype_to_canonical(self, dtype_str: str) -> str:
 +         """Map pandas/numpy dtype strings to canonical type names."""
 +         dtype_map = {
@@ -6478,19 +6478,19 @@ I'll update the Pandera type system to better handle schema objects and standard
 +             "category": "str",
 +             "string": "str"
 +         }
-+         
++
 +         # Handle numpy/pandas dtype strings
 +         dtype_str = str(dtype_str).lower()
 +         for key in dtype_map:
 +             if key in dtype_str:
 +                 return dtype_map[key]
 +         return "any"
-  
+
       def _pandera_check_to_constraint(self, check: pa.Check) -> Optional[Constraint]:
 -         """Maps a Pandera Check object to a core Constraint object."""
 -         stats = check.statistics
 -         check_name = check.name or check._check_fn.__name__ if hasattr(check, '_check_fn') else None
-- 
+-
 -         if check_name == 'greater_than_or_equal_to' and 'min_value' in stats:
 -             return MinValue(value=stats['min_value'])
 -         if check_name == 'less_than_or_equal_to' and 'max_value' in stats:
@@ -6517,10 +6517,10 @@ I'll update the Pandera type system to better handle schema objects and standard
 +         """Convert a Pandera Check to a Constraint."""
 +         if not check:
 +             return None
-+ 
++
 +         check_fn = check.check_fn
 +         check_kwargs = check.check_kwargs or {}
-+ 
++
 +         # Map common check functions to constraints
 +         if check_fn == "greater_than":
 +             return GreaterThan(value=check_kwargs.get("min_value"))
@@ -6532,9 +6532,9 @@ I'll update the Pandera type system to better handle schema objects and standard
 +             return Pattern(pattern="|".join(map(str, check_kwargs.get("allowed_values", []))))
 +         elif check_fn == "str_matches":
 +             return Pattern(pattern=check_kwargs.get("pattern", ""))
-  
+
           return None
-  
+
       def _constraint_to_pandera_check(self, constraint: Constraint) -> Optional[pa.Check]:
 -          """Maps a core Constraint object back to a Pandera Check."""
 -          if isinstance(constraint, MinValue):
@@ -6559,7 +6559,7 @@ I'll update the Pandera type system to better handle schema objects and standard
 -              # Pandera doesn't have a built-in multiple_of check? Custom check needed.
 -              # return pa.Check(lambda x: (Decimal(str(x)) % Decimal(str(constraint.value))) == 0, name="multiple_of")
 -              return None # Cannot map back directly without custom check support
-- 
+-
 +         """Convert a Constraint to a Pandera Check."""
 +         if isinstance(constraint, (GreaterThan, GreaterThanOrEqual)):
 +             return pa.Check.greater_than(constraint.value)
@@ -6573,7 +6573,7 @@ I'll update the Pandera type system to better handle schema objects and standard
 +             return pa.Check.str_matches(constraint.pattern)
 +         elif isinstance(constraint, MultipleOf):
 +             return pa.Check(lambda x: x % constraint.value == 0)
-          return None 
+          return None
 ```
 
 ---
@@ -6813,7 +6813,7 @@ Now I'll implement the `from_canonical` method for SQLModel classes:
 + from typing import Any, Dict, Type, Optional, List, Union, Tuple
   from functools import lru_cache
 + import inspect
-  
+
   try:
 -     from sqlmodel import SQLModel
 +     from sqlmodel import SQLModel, Field
@@ -6835,7 +6835,7 @@ Now I'll implement the `from_canonical` method for SQLModel classes:
           # Table name
 -         sql_meta_data['sql_tablename'] = getattr(type_obj, '__tablename__', type_obj.__name__.lower())  # Default convention
 +         sql_meta_data['sql_tablename'] = getattr(type_obj, '__tablename__', type_obj.__name__.lower())
-  
+
           # Primary Keys (Check Pydantic fields for primary_key=True)
                   for arg in table_args:
                       if hasattr(arg, '__visit_name__') and arg.__visit_name__ == 'index':
@@ -6853,76 +6853,76 @@ Now I'll implement the `from_canonical` method for SQLModel classes:
 -         raise NotImplementedError("Dynamic SQLModel reconstruction from CanonicalType is complex and not yet supported.")
 +         """
 +         Reconstruct a SQLModel class from CanonicalType.
-+         
++
 +         Args:
 +             canonical: The canonical type representation
-+             
++
 +         Returns:
 +             A dynamically created SQLModel class
-+             
++
 +         Raises:
 +             ConversionError: If reconstruction fails
 +         """
 +         if canonical.kind != "composite":
 +             raise ConversionError(f"Cannot create SQLModel from non-composite type: {canonical.kind}")
-+ 
++
 +         meta = canonical.meta.data if canonical.meta else {}
 +         if not meta.get("is_sqlmodel", False):
 +             raise ConversionError("Canonical type does not represent a SQLModel")
-+ 
++
 +         try:
 +             # 1. Get base Pydantic model from canonical
 +             base_model_class = self._pydantic_system.from_canonical(canonical)
 +         except Exception as e:
 +             raise ConversionError(f"Failed to create base Pydantic model: {e}") from e
-+ 
++
 +         # 2. Extract SQL metadata
 +         tablename = meta.get('sql_tablename', canonical.name.lower())
 +         primary_keys = meta.get('sql_primary_key', [])
 +         indexes = meta.get('sql_indexes', [])
 +         relationships = meta.get('sql_relationships', {})
-+ 
++
 +         # 3. Prepare model attributes
 +         model_attrs = {
 +             "__tablename__": tablename,
 +             "_sa_table_args": self._build_table_args(indexes),
 +         }
-+ 
++
 +         # 4. Process fields to add SQLModel-specific attributes
 +         fields = canonical.params.get("fields", {})
 +         for name, field_info in fields.items():
 +             field_meta = field_info.get("meta", {})
 +             field_constraints = field_info.get("constraints", {})
-+ 
++
 +             # Get the field from the base model
 +             if hasattr(base_model_class, name):
 +                 base_field = getattr(base_model_class, name)
 +                 field_type = base_field.annotation if hasattr(base_field, 'annotation') else Any
-+ 
++
 +                 # Create SQLModel Field with SQL-specific attributes
 +                 field_kwargs = {}
-+                 
++
 +                 # Handle primary key
 +                 if name in primary_keys:
 +                     field_kwargs['primary_key'] = True
-+ 
++
 +                 # Handle foreign keys if present in constraints
 +                 if 'foreign_key' in field_constraints:
 +                     field_kwargs['foreign_key'] = field_constraints['foreign_key']
-+ 
++
 +                 # Handle nullable/optional
 +                 field_kwargs['nullable'] = not field_info.get('required', True)
-+ 
++
 +                 # Handle default value
 +                 if 'default' in field_info:
 +                     field_kwargs['default'] = field_info['default']
-+ 
++
 +                 # Create the SQLModel Field
 +                 model_attrs[name] = Field(
 +                     default=field_info.get('default', ...),
 +                     **field_kwargs
 +                 )
-+ 
++
 +         # 5. Add relationships
 +         for rel_name, rel_info in relationships.items():
 +             rel_kwargs = {
@@ -6931,27 +6931,27 @@ Now I'll implement the `from_canonical` method for SQLModel classes:
 +             }
 +             # Filter out None values
 +             rel_kwargs = {k: v for k, v in rel_kwargs.items() if v is not None}
-+             
++
 +             model_attrs[rel_name] = relationship(rel_info['target'], **rel_kwargs)
-+ 
++
 +         # 6. Create the SQLModel class
 +         try:
 +             model_class = type(canonical.name, (SQLModel,), model_attrs)
-+             
++
 +             # Mark as table model
 +             setattr(model_class, '__table__', True)
-+             
++
 +             return model_class
 +         except Exception as e:
 +             raise ConversionError(f"Failed to create SQLModel class: {e}") from e
-  
+
       def detect(self, obj: Any) -> bool:
           )
-  
+
 +     def _build_table_args(self, indexes: List[Dict]) -> Tuple:
 +         """Build SQLAlchemy table arguments from metadata."""
 +         table_args = []
-+         
++
 +         # Create Index objects
 +         for idx in indexes:
 +             try:
@@ -6964,9 +6964,9 @@ Now I'll implement the `from_canonical` method for SQLModel classes:
 +                 )
 +             except Exception:
 +                 continue  # Skip invalid indexes
-+ 
++
 +         return tuple(table_args)
-+ 
++
       # @property
       # def pydantic_system(self) -> PydanticTypeSystem:
 ```
@@ -7030,7 +7030,7 @@ I'll enhance the `from_canonical` method to better handle relationships, default
   from functools import lru_cache
   import inspect
 + from decimal import Decimal
-  
+
   try:
 -     from sqlalchemy import Column, Table, MetaData
 -     from sqlalchemy.orm import DeclarativeMeta, Mapped, mapped_column
@@ -7043,10 +7043,10 @@ I'll enhance the `from_canonical` method to better handle relationships, default
   except ImportError:
       Column = Table = MetaData = DeclarativeMeta = Mapped = mapped_column = registry = SchemaItem = None
 +     Index = UniqueConstraint = CheckConstraint = ForeignKey = relationship = text = func = None
-  
+
   from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
                   constraints['foreign_keys'] = fk_list
-  
+
 -             # Get default value if any
 +             # Get default value and server default
               default_value = ...  # Ellipsis represents no default
@@ -7065,10 +7065,10 @@ I'll enhance the `from_canonical` method to better handle relationships, default
 +                     'sql': str(column.server_default.arg),
 +                     'for_update': bool(column.server_onupdate)
 +                 }
-  
+
               fields_canonical[name] = {
               model_meta["description"] = model_description
-  
+
 -         # Add relationships if available
 +         # Extract table constraints and indexes
 +         table_args = []
@@ -7085,7 +7085,7 @@ I'll enhance the `from_canonical` method to better handle relationships, default
 +                     'name': constraint.name,
 +                     'sqltext': str(constraint.sqltext)
 +                 })
-+ 
++
 +         for index in table.indexes:
 +             table_args.append({
 +                 'type': 'index',
@@ -7097,10 +7097,10 @@ I'll enhance the `from_canonical` method to better handle relationships, default
 +                     'postgresql_where': str(getattr(index, 'postgresql_where', None)) if getattr(index, 'postgresql_where', None) else None
 +                 }
 +             })
-+ 
++
 +         if table_args:
 +             model_meta['table_args'] = table_args
-+ 
++
 +         # Add relationships with more detail
           relationships = {}
           for name, rel in inspect.getmembers(type_obj):
@@ -7142,31 +7142,31 @@ I'll enhance the `from_canonical` method to better handle relationships, default
 +                             )
 +                     else:
                           column_kwargs["default"] = default_value
-  
+
 +                 # Handle server default
 +                 if "server_default" in constraints:
 +                     server_default = constraints["server_default"]
 +                     column_kwargs["server_default"] = text(server_default["sql"])
 +                     if server_default.get("for_update"):
 +                         column_kwargs["server_onupdate"] = text(server_default["sql"])
-+ 
++
                   # Add description/comment if available
                   if field_info.get("description"):
-  
+
           # Get table name and schema from metadata
 -         table_name = canonical.meta.get("table_name", canonical.name.lower())
 -         schema = canonical.meta.get("schema")
-- 
+-
 -         # Create model class
 +         meta = canonical.meta.data if canonical.meta else {}
 +         table_name = meta.get("table_name", canonical.name.lower())
 +         schema = meta.get("schema")
-+ 
++
 +         # Build table arguments
 +         table_args = []
 +         if schema:
 +             table_args.append({"schema": schema})
-+ 
++
 +         # Add constraints and indexes from metadata
 +         for arg in meta.get("table_args", []):
 +             arg_type = arg.get("type")
@@ -7194,7 +7194,7 @@ I'll enhance the `from_canonical` method to better handle relationships, default
 +                         **index_kwargs
 +                     )
 +                 )
-+ 
++
 +         # Create model attributes
           model_attrs = {
               "__tablename__": table_name,
@@ -7202,13 +7202,13 @@ I'll enhance the `from_canonical` method to better handle relationships, default
 +             "__table_args__": tuple(table_args) if table_args else None,
               **columns
           }
-  
+
           # Add docstring if available
 -         if canonical.meta and canonical.meta.get("description"):
 -             model_attrs["__doc__"] = canonical.meta["description"]
 +         if meta.get("description"):
 +             model_attrs["__doc__"] = meta["description"]
-+ 
++
 +         # Add relationships
 +         for rel_name, rel_info in meta.get("relationships", {}).items():
 +             rel_kwargs = {
@@ -7219,16 +7219,16 @@ I'll enhance the `from_canonical` method to better handle relationships, default
 +             }
 +             # Filter out None values
 +             rel_kwargs = {k: v for k, v in rel_kwargs.items() if v is not None}
-+ 
++
 +             # Add foreign keys if specified
 +             if "foreign_keys" in rel_info:
 +                 rel_kwargs["foreign_keys"] = [
 +                     columns[fk["column"]] for fk in rel_info["foreign_keys"]
 +                     if fk["column"] in columns
 +                 ]
-+ 
++
 +             model_attrs[rel_name] = relationship(rel_info["target"], **rel_kwargs)
-  
+
           try:
 ```
 
@@ -7360,7 +7360,7 @@ Let me try to reapply the edit with a more focused approach:
   import datetime
   import re
 + import operator
-  
+
   try:
       import pandera as pa
       from pandera.engines import numpy_engine, pandas_engine
@@ -7373,7 +7373,7 @@ Let me try to reapply the edit with a more focused approach:
       DataFrame = None
 +     np = None
 +     pd = None
-  
+
   from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
   from politipo.core.errors import ConversionError, PolitipoError
 - # Import constraint classes
@@ -7383,10 +7383,10 @@ Let me try to reapply the edit with a more focused approach:
 -     Pattern, MultipleOf, constraint_from_dict, Constraint
 +     Pattern, MultipleOf, OneOf, constraint_from_dict, Constraint
   )
-  
-  
+
+
       name = "pandera"
-+ 
++
 +     # Mapping of constraint types to Pandera check methods
 +     CHECK_MAPPING = {
 +         GreaterThan: ("greater_than", "min_value"),
@@ -7401,7 +7401,7 @@ Let me try to reapply the edit with a more focused approach:
 +         OneOf: ("isin", "allowed_values"),
 +         MultipleOf: (None, None)  # Custom check needed
 +     }
-+ 
++
 +     # Mapping of Pandera check names to constraint types
 +     REVERSE_CHECK_MAPPING = {
 +         "greater_than": GreaterThan,
@@ -7413,7 +7413,7 @@ Let me try to reapply the edit with a more focused approach:
 +         "str_matches": Pattern,
 +         "isin": OneOf,
 +     }
-  
+
       def __init__(self):
               if constraint_name in ("nullable", "unique", "coerce", "pattern"):
                   continue
@@ -7426,7 +7426,7 @@ Let me try to reapply the edit with a more focused approach:
 +             except Exception as e:
 +                 # Log warning or handle error as needed
 +                 continue
-  
+
           # Create series schema
           columns = {}
           for name, field_info in fields.items():
@@ -7444,13 +7444,13 @@ Let me try to reapply the edit with a more focused approach:
 +                     except Exception as e:
 +                         # Log warning or handle error as needed
 +                         continue
-  
+
                   # Create column with constraints
                   )
-  
+
 +             except Exception as e:
 +                 raise ConversionError(f"Error creating column '{name}': {e}") from e
-+ 
++
 +         # Build index schema if specified
 +         index = None
 +         if "index" in meta:
@@ -7469,7 +7469,7 @@ Let me try to reapply the edit with a more focused approach:
 +             except Exception as e:
 +                 # Log warning or handle error as needed
 +                 pass
-+ 
++
           # Create DataFrame schema
           return pa.DataFrameSchema(
               columns=columns,
@@ -7477,26 +7477,26 @@ Let me try to reapply the edit with a more focused approach:
 +             index=index,
               unique_column_names=meta.get("unique_column_names"),
               coerce=meta.get("coerce"),
-  
+
       def _pandera_check_to_constraint(self, check: pa.Check) -> Optional[Constraint]:
 -         """Convert a Pandera Check to a Constraint."""
 +         """
 +         Convert a Pandera Check to a Constraint.
-+         
++
 +         Args:
 +             check: The Pandera check to convert
-+             
++
 +         Returns:
 +             A Constraint object, or None if conversion is not possible
 +         """
           if not check:
               return None
-  
+
 -         check_fn = check.check_fn
 +         check_name = check.name or (check.check_fn if isinstance(check.check_fn, str) else None)
 +         if not check_name:
 +             return None
-+ 
++
 +         # Handle custom checks
 +         if check_name.startswith("multiple_of_"):
 +             try:
@@ -7504,15 +7504,15 @@ Let me try to reapply the edit with a more focused approach:
 +                 return MultipleOf(value=value)
 +             except (ValueError, IndexError):
 +                 return None
-+ 
++
 +         # Get constraint type from mapping
 +         constraint_type = self.REVERSE_CHECK_MAPPING.get(check_name)
 +         if not constraint_type:
 +             return None
-+ 
++
 +         # Extract value from check kwargs
           check_kwargs = check.check_kwargs or {}
-          
+
 -         # Map common check functions to constraints
 -         if check_fn == "greater_than":
 -             return GreaterThan(value=check_kwargs.get("min_value"))
@@ -7547,14 +7547,14 @@ Let me try to reapply the edit with a more focused approach:
 +         elif check_name == "str_matches":
 +             pattern = check_kwargs.get("pattern", "")
 +             return Pattern(pattern=pattern)
-+ 
++
 +         # Standard case: get value using the first available kwarg
 +         for key in ["min_value", "max_value", "value"]:
 +             if key in check_kwargs:
 +                 return constraint_type(value=check_kwargs[key])
-  
+
           return None
-  
+
       def _constraint_to_pandera_check(self, constraint: Constraint) -> Optional[pa.Check]:
 -         """Convert a Constraint to a Pandera Check."""
 -         if isinstance(constraint, (GreaterThan, GreaterThanOrEqual)):
@@ -7571,22 +7571,22 @@ Let me try to reapply the edit with a more focused approach:
 -             return pa.Check(lambda x: x % constraint.value == 0)
 +         """
 +         Convert a Constraint to a Pandera Check.
-+         
++
 +         Args:
 +             constraint: The constraint to convert
-+             
++
 +         Returns:
 +             A Pandera Check object, or None if conversion is not possible
 +         """
 +         if not isinstance(constraint, Constraint):
 +             return None
-+ 
++
 +         constraint_type = type(constraint)
 +         if constraint_type not in self.CHECK_MAPPING:
 +             return None
-+ 
++
 +         check_name, value_key = self.CHECK_MAPPING[constraint_type]
-+         
++
 +         # Handle special cases first
 +         if constraint_type == MultipleOf:
 +             # Create custom check for MultipleOf
@@ -7598,15 +7598,15 @@ Let me try to reapply the edit with a more focused approach:
 +                 except (TypeError, ValueError):
 +                     return False
 +             return pa.Check(multiple_of_check, name=f"multiple_of_{constraint.value}")
-+ 
++
 +         if check_name is None:
 +             return None
-+ 
++
 +         # Get the check method from Pandera
 +         check_method = getattr(pa.Check, check_name, None)
 +         if check_method is None:
               return None
-+ 
++
 +         # Handle special cases for different constraint types
 +         if constraint_type in (MinValue, MaxValue):
 +             kwargs = {}
@@ -7683,7 +7683,7 @@ Let me check the pandera plugin's initialization file:
 
 <details>
             <summary>Searched codebase "pandera/__init__.py" • **1** results</summary>
-        
+
 | File |
 |------|
 | `undefined` |
@@ -7706,7 +7706,7 @@ The `__init__.py` file looks correct - it's properly exposing the `PanderaTypeSy
 
 <details>
             <summary>Listed directory politipo/plugins/pandera • **3** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `__pycache__` |
@@ -7741,7 +7741,7 @@ Let me check if the `plugins` directory has a proper `__init__.py`:
 
 <details>
             <summary>Listed directory politipo/plugins • **7** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `sqlalchemy` |
@@ -7815,7 +7815,7 @@ The implementation looks correct. Let me check if there might be any issues with
 
 <details>
             <summary>Listed directory politipo/plugins • **7** results</summary>
-        
+
 | Name |
 |-------|
 | 📁 `sqlalchemy` |
@@ -7836,7 +7836,7 @@ Let me check if there's a `__init__.py` in the plugins directory:
 
 <details>
             <summary>Searched codebase "plugins/__init__.py" • **7** results</summary>
-        
+
 | File |
 |------|
 | `undefined` |
@@ -7856,10 +7856,10 @@ Let me check if we need to add a `__init__.py` to the plugins directory itself:
 ---
 
 ```diff
-- 
+-
 + """Plugin system for Politipo."""
-+ 
-+ # This file ensures the plugins directory is treated as a Python package 
++
++ # This file ensures the plugins directory is treated as a Python package
 ```
 
 ---
@@ -7937,7 +7937,7 @@ Let's modify the main `__init__.py` to handle this case gracefully:
 ```diff
   from politipo.plugins.pandas import PandasTypeSystem
   from politipo.plugins.polars import PolarsTypeSystem
-+ 
++
 + # Optional plugins that depend on external packages
 + try:
       from politipo.plugins.pandera import PanderaTypeSystem
@@ -7945,13 +7945,13 @@ Let's modify the main `__init__.py` to handle this case gracefully:
 + except ImportError:
 +     HAS_PANDERA = False
 +     PanderaTypeSystem = None
-  
+
   __all__ = [
       'PandasTypeSystem',
       'PolarsTypeSystem',
 -     'PanderaTypeSystem',
   ]
-+ 
++
 + # Add optional type systems if available
 + if HAS_PANDERA:
 +     __all__.append('PanderaTypeSystem')
@@ -7965,7 +7965,7 @@ Now let's also update the pandera plugin's `__init__.py` to be more explicit abo
 
 ```diff
 + """Pandera plugin for Politipo."""
-+ 
++
   try:
 +     import pandera as pa
 +     import pandas as pd
@@ -7974,13 +7974,13 @@ Now let's also update the pandera plugin's `__init__.py` to be more explicit abo
       __all__ = ["PanderaTypeSystem"]
 - except ImportError:
 -     # Allow importing __init__ even if pandera isn't installed
--     __all__ = [] 
+-     __all__ = []
 + except ImportError as e:
 +     # Allow importing __init__ even if dependencies aren't installed
 +     __all__ = []
 +     # Optionally log which dependency is missing
 +     import warnings
-+     warnings.warn(f"Pandera plugin dependencies not satisfied: {e}. The plugin will be disabled.") 
++     warnings.warn(f"Pandera plugin dependencies not satisfied: {e}. The plugin will be disabled.")
 ```
 
 ---
@@ -8009,7 +8009,7 @@ Let me know if you'd like me to proceed with Task 4 (improving SQLAlchemy fallba
 
 _**User**_
 
-please proced with Task 4 (improving SQLAlchemy fallback metadata) 
+please proced with Task 4 (improving SQLAlchemy fallback metadata)
 
 ---
 
@@ -8048,7 +8048,7 @@ Let me implement these improvements:
   from functools import lru_cache
   from decimal import Decimal
 + import inspect
-  
+
   try:
       import sqlalchemy.types as sa_types
 +     from sqlalchemy.sql.type_api import TypeEngine
@@ -8056,7 +8056,7 @@ Let me implement these improvements:
       # Allow type checking even if sqlalchemy isn't installed
       sa_types = None
 +     TypeEngine = None
-  
+
   from politipo.core.types import TypeSystem, CanonicalType, TypeMeta
               sa_types.Unicode: "str",
               sa_types.UnicodeText: "str",
@@ -8071,7 +8071,7 @@ Let me implement these improvements:
 +             sa_types.PickleType: "any",  # Pickle is too specific
 +             sa_types.JSON: "dict",  # Map JSON to dict instead of any
           }
-  
+
           # Mapping from canonical primitive names to SA type classes
           self._from_canonical_map: Dict[str, Type[sa_types.TypeEngine]] = {
               "int": sa_types.Integer,
@@ -8086,14 +8086,14 @@ Let me implement these improvements:
 +             "dict": sa_types.JSON,  # Map dict to JSON
 +             "any": sa_types.PickleType,
 +         }
-+ 
++
 +     def _extract_type_info(self, type_obj: Union[Type[TypeEngine], TypeEngine]) -> Dict[str, Any]:
 +         """
 +         Extract detailed type information from a SQLAlchemy type.
-+         
++
 +         Args:
 +             type_obj: SQLAlchemy type to analyze
-+             
++
 +         Returns:
 +             Dictionary containing type metadata
 +         """
@@ -8102,19 +8102,19 @@ Let me implement these improvements:
 +             "module": type_obj.__class__.__module__,
 +             "is_custom": not type_obj.__class__.__module__.startswith('sqlalchemy'),
 +         }
-+ 
++
 +         # Extract common attributes
 +         for attr in ['length', 'precision', 'scale', 'timezone', 'collation']:
 +             if hasattr(type_obj, attr):
 +                 value = getattr(type_obj, attr)
 +                 if value is not None:
 +                     info[attr] = value
-+ 
++
 +         # Handle enum types
 +         if isinstance(type_obj, sa_types.Enum):
 +             info['enum_values'] = type_obj.enums
 +             info['enum_name'] = type_obj.name
-+ 
++
 +         # Extract python type if available
 +         if hasattr(type_obj, 'python_type'):
 +             try:
@@ -8123,7 +8123,7 @@ Let me implement these improvements:
 +                 info['python_module'] = python_type.__module__
 +             except (AttributeError, TypeError):
 +                 pass
-+ 
++
 +         # Extract custom type parameters
 +         if info['is_custom']:
 +             params = {}
@@ -8137,19 +8137,19 @@ Let me implement these improvements:
 +                         continue
 +             if params:
 +                 info['custom_params'] = params
-+ 
++
 +         return info
-  
+
       def get_default_canonical(self) -> CanonicalType:
       @lru_cache(maxsize=128)
       def to_canonical(self, type_obj: Type) -> CanonicalType:
 -         """Convert a SQLAlchemy type to CanonicalType."""
 +         """
 +         Convert a SQLAlchemy type to CanonicalType.
-+         
++
 +         Args:
 +             type_obj: SQLAlchemy type to convert
-+             
++
 +         Returns:
 +             CanonicalType representation
 +         """
@@ -8158,7 +8158,7 @@ Let me implement these improvements:
 -             # Extract type info
 -             type_name = getattr(type_obj, '__visit_name__', 'unknown')
 -             type_params = {}
--             
+-
 -             # Map common SQL types to canonical primitives
 -             sql_to_canonical = {
 -                 'integer': 'int',
@@ -8171,9 +8171,9 @@ Let me implement these improvements:
 -                 'interval': 'timedelta',
 -                 'binary': 'bytes'
 -             }
--             
+-
 -             canonical_name = sql_to_canonical.get(type_name, 'any')
--             
+-
 -             # Extract type parameters if available
 -             if hasattr(type_obj, 'length'):
 -                 type_params['length'] = type_obj.length
@@ -8184,11 +8184,11 @@ Let me implement these improvements:
 +         if isinstance(type_obj, (TypeEngine, type)) and hasattr(type_obj, '__visit_name__'):
 +             # Extract detailed type info
 +             type_info = self._extract_type_info(type_obj)
-+             
++
 +             # Try to map to a canonical primitive
 +             type_class = type_obj if isinstance(type_obj, type) else type_obj.__class__
 +             canonical_name = self._to_canonical_map.get(type_class)
-+ 
++
 +             if canonical_name:
 +                 # Known type - extract parameters
 +                 params = {}
@@ -8202,7 +8202,7 @@ Let me implement these improvements:
 +                     params['enum_values'] = type_info['enum_values']
 +                 if 'timezone' in type_info:
 +                     params['timezone'] = type_info['timezone']
-  
+
                   return CanonicalType(
                       kind="primitive",
                       name=canonical_name,
@@ -8233,7 +8233,7 @@ Let me implement these improvements:
 +                     }
 +                     key = f"{type_info['python_module']}.{type_info['python_type']}"
 +                     inferred_type = python_type_map.get(key, 'any')
-+ 
++
 +                 return CanonicalType(
 +                     kind="primitive",
 +                     name=inferred_type,
@@ -8245,7 +8245,7 @@ Let me implement these improvements:
 +                         "is_inferred": True
                       })
                   )
-  
+
 -         # Fallback for unknown types
 +         # Non-SQLAlchemy type fallback
           return CanonicalType(
@@ -8260,16 +8260,16 @@ Let me implement these improvements:
 +                 "is_fallback": True
               })
           )
-  
+
       @lru_cache(maxsize=128)
       def from_canonical(self, canonical: CanonicalType) -> Type[sa_types.TypeEngine]:
 -         """Reconstructs an SQLAlchemy type from CanonicalType."""
 +         """
 +         Reconstructs an SQLAlchemy type from CanonicalType.
-+         
++
 +         Args:
 +             canonical: The canonical type to convert
-+             
++
 +         Returns:
 +             SQLAlchemy type
 +         """
@@ -8279,11 +8279,11 @@ Let me implement these improvements:
 -             # Raise error or default to a generic type like PickleType or String
 -             # raise ConversionError(f"Cannot convert non-primitive CanonicalType '{canonical.kind}:{canonical.name}' to SQLAlchemy type")
 -             return sa_types.PickleType # Or sa_types.String?
-- 
+-
 +             # For non-primitive types, try to use the original SQL type if available
 +             meta = canonical.meta.data if canonical.meta else {}
 +             sql_type_info = meta.get('sql_type', {})
-+             
++
 +             if sql_type_info and not sql_type_info.get('is_custom', False):
 +                 # Try to reconstruct the original SQL type
 +                 type_name = sql_type_info.get('type_name')
@@ -8291,31 +8291,31 @@ Let me implement these improvements:
 +                     try:
 +                         type_class = getattr(sa_types, type_name.title(), None)
 +                         if type_class:
-+                             kwargs = {k: v for k, v in sql_type_info.items() 
++                             kwargs = {k: v for k, v in sql_type_info.items()
 +                                     if k in ['length', 'precision', 'scale', 'timezone']}
 +                             return type_class(**kwargs)
 +                     except Exception:
 +                         pass
-+             
++
 +             # Fallback to JSON for composite types
 +             return sa_types.JSON
-+ 
++
 +         # Handle primitive types
           if canonical.name in self._from_canonical_map:
               base_sa_type = self._from_canonical_map[canonical.name]
               kwargs = {}
-  
+
 -             # Apply length constraint back to String
 +             # Get original SQL type info if available
 +             meta = canonical.meta.data if canonical.meta else {}
 +             sql_type_info = meta.get('sql_type', {})
-+ 
++
 +             # Apply type-specific parameters
               if base_sa_type is sa_types.String:
 -                 max_length_constraint = canonical.constraints.get('MaxLength')
 -                 if max_length_constraint and isinstance(max_length_constraint.value, int):
 -                      kwargs['length'] = max_length_constraint.value
-- 
+-
 -             # Apply precision/scale back to Numeric
 -             if base_sa_type is sa_types.Numeric:
 -                 if 'precision' in canonical.params:
@@ -8328,14 +8328,14 @@ Let me implement these improvements:
 +                     length = canonical.constraints['MaxLength'].value
 +                 if length is not None:
 +                     kwargs['length'] = length
-+ 
++
 +             elif base_sa_type is sa_types.Numeric:
 +                 # Use original precision/scale if available
 +                 if 'precision' in sql_type_info:
 +                     kwargs['precision'] = sql_type_info['precision']
 +                 if 'scale' in sql_type_info:
 +                     kwargs['scale'] = sql_type_info['scale']
-  
+
 -              # Handle Enum reconstruction
 -             if base_sa_type is sa_types.Enum and 'enum_values' in canonical.params:
 -                 # SA Enum requires the values at instantiation
@@ -8344,18 +8344,18 @@ Let me implement these improvements:
 -                 # Enum name is typically required, use canonical name or default
 -                 enum_name = f"{canonical.name}_enum"
 -                 return sa_types.Enum(*enum_values, name=enum_name) # Pass values directly
-- 
+-
 -             # Handle DateTime timezone
 -             if base_sa_type is sa_types.DateTime and canonical.params.get('timezone'):
 -                 kwargs['timezone'] = True
 +                 enum_name = sql_type_info.get('enum_name', f"{canonical.name}_enum")
 +                 return sa_types.Enum(*enum_values, name=enum_name)
-+ 
++
 +             elif base_sa_type is sa_types.DateTime:
 +                 # Preserve timezone setting
 +                 if 'timezone' in sql_type_info:
 +                     kwargs['timezone'] = sql_type_info['timezone']
-  
+
 -             # Instantiate the type with kwargs if any
 -             if kwargs:
 +             # Try to instantiate with kwargs
@@ -8374,7 +8374,7 @@ Let me implement these improvements:
 +             # Check if we have original SQL type info
 +             meta = canonical.meta.data if canonical.meta else {}
 +             sql_type_info = meta.get('sql_type', {})
-+             
++
 +             if sql_type_info and not sql_type_info.get('is_custom', False):
 +                 # Try to reconstruct the original SQL type
 +                 type_name = sql_type_info.get('type_name')
@@ -8382,12 +8382,12 @@ Let me implement these improvements:
 +                     try:
 +                         type_class = getattr(sa_types, type_name.title(), None)
 +                         if type_class:
-+                             kwargs = {k: v for k, v in sql_type_info.items() 
++                             kwargs = {k: v for k, v in sql_type_info.items()
 +                                     if k in ['length', 'precision', 'scale', 'timezone']}
 +                             return type_class(**kwargs)
 +                     except Exception:
 +                         pass
-+ 
++
 +             # Fallback based on canonical name
 +             fallback_map = {
 +                 'dict': sa_types.JSON,
@@ -8396,21 +8396,21 @@ Let me implement these improvements:
 +                 'any': sa_types.PickleType
 +             }
 +             return fallback_map.get(canonical.name, sa_types.String)()
-  
+
       def detect(self, obj: Any) -> bool:
           """Returns True if the object is an SQLAlchemy type."""
 -         if sa_types is None: return False # Cannot detect if not installed
-- 
+-
 -         # Check if it's an instance of a TypeEngine or a subclass of TypeEngine
 -         return isinstance(obj, sa_types.TypeEngine) or (
 -                isinstance(obj, type) and issubclass(obj, sa_types.TypeEngine)
 +         if sa_types is None:
 +             return False
-+ 
++
 +         return (
 +             isinstance(obj, TypeEngine) or
 +             (isinstance(obj, type) and issubclass(obj, TypeEngine))
-          ) 
+          )
 ```
 
 ---
@@ -8773,17 +8773,17 @@ I'll help implement the schema tools module. Let me create the new files and mak
 ---
 
 ```diff
-- 
+-
 + """
 + Utility functions for direct schema translation between Pydantic and Pandera.
-+ 
++
 + These functions provide higher-level conversions for schema definitions,
 + building upon the core TypeSystem plugins. They require both Pydantic
 + and Pandera to be installed.
 + """
-+ 
++
 + from typing import Type, Optional
-+ 
++
 + # Guard imports for optional dependencies
 + try:
 +     import pandera as pa
@@ -8801,13 +8801,13 @@ I'll help implement the schema tools module. Let me create the new files and mak
 +     else:
 +         # Re-raise if it's some other import error
 +         raise e
-+ 
++
 + # Politipo core imports
 + from politipo.plugins.pydantic import PydanticTypeSystem
 + from politipo.plugins.pandera import PanderaTypeSystem
 + from politipo.core.errors import ConversionError, PolitipoError
-+ 
-+ 
++
++
 + def pydantic_to_pandera_schema(
 +     model_cls: Type[BaseModel],
 +     pandera_system: Optional[PanderaTypeSystem] = None,
@@ -8815,20 +8815,20 @@ I'll help implement the schema tools module. Let me create the new files and mak
 + ) -> 'pa.DataFrameSchema':
 +     """
 +     Converts a Pydantic model class definition to a Pandera DataFrameSchema object.
-+ 
++
 +     This function leverages the underlying TypeSystem plugins. It requires
 +     that the `to_canonical` method for the Pydantic plugin and the
 +     `from_canonical` method for the Pandera plugin (handling composite types)
 +     are fully implemented.
-+ 
++
 +     Args:
 +         model_cls: The Pydantic BaseModel class to convert.
 +         pandera_system: Optional pre-instantiated PanderaTypeSystem.
 +         pydantic_system: Optional pre-instantiated PydanticTypeSystem.
-+ 
++
 +     Returns:
 +         A Pandera DataFrameSchema object representing the Pydantic model structure.
-+ 
++
 +     Raises:
 +         PolitipoError: If Pydantic or Pandera libraries are not installed.
 +         TypeError: If 'model_cls' is not a Pydantic BaseModel class.
@@ -8842,32 +8842,32 @@ I'll help implement the schema tools module. Let me create the new files and mak
 +         raise PolitipoError("Pandera is required for pydantic_to_pandera_schema conversion.")
 +     if not (isinstance(model_cls, type) and issubclass(model_cls, BaseModel)):
 +         raise TypeError(f"Input 'model_cls' must be a Pydantic BaseModel class, got {type(model_cls)}")
-+ 
++
 +     try:
 +         _pyd_sys = pydantic_system or PydanticTypeSystem()
 +         _pa_sys = pandera_system or PanderaTypeSystem()
 +     except PolitipoError as e:
 +         # Catch potential errors if deps were somehow missed during instantiation
 +         raise PolitipoError(f"Failed to initialize required type systems: {e}") from e
-+ 
++
 +     try:
 +         # Convert Pydantic model class to CanonicalType
 +         canonical_model = _pyd_sys.to_canonical(model_cls)
-+ 
++
 +         # Ensure it's a composite type (as expected for a model)
 +         if canonical_model.kind != "composite":
 +             raise ConversionError(f"Pydantic model {model_cls.__name__} did not resolve to a composite canonical type.")
-+ 
++
 +         # Convert CanonicalType back to a Pandera DataFrameSchema
 +         # This relies on PanderaTypeSystem.from_canonical being implemented correctly
 +         pandera_schema = _pa_sys.from_canonical(canonical_model)
-+ 
++
 +         # Validate the output type
 +         if not isinstance(pandera_schema, pa.DataFrameSchema):
 +             raise ConversionError(f"Pandera system did not return a DataFrameSchema instance from canonical model {canonical_model.name}. Got: {type(pandera_schema)}")
-+ 
++
 +         return pandera_schema
-+ 
++
 +     except NotImplementedError as nie:
 +         # Specific feedback if from_canonical is the blocker
 +         raise NotImplementedError(f"Conversion requires PanderaTypeSystem.from_canonical implementation for composite types: {nie}") from nie
@@ -8877,8 +8877,8 @@ I'll help implement the schema tools module. Let me create the new files and mak
 +     except Exception as e:
 +         # Wrap unexpected errors
 +         raise ConversionError(f"Unexpected error during Pydantic -> Pandera schema conversion for {model_cls.__name__}: {e}") from e
-+ 
-+ 
++
++
 + def pandera_to_pydantic_model(
 +     schema: 'pa.DataFrameSchema',
 +     pandera_system: Optional[PanderaTypeSystem] = None,
@@ -8886,20 +8886,20 @@ I'll help implement the schema tools module. Let me create the new files and mak
 + ) -> Type[BaseModel]:
 +     """
 +     Converts a Pandera DataFrameSchema object to a Pydantic model class definition.
-+ 
++
 +     This function leverages the underlying TypeSystem plugins. It requires
 +     that the `to_canonical` method for the Pandera plugin (handling DataFrameSchema)
 +     and the `from_canonical` method for the Pydantic plugin (handling composite types)
 +     are fully implemented.
-+ 
++
 +     Args:
 +         schema: The Pandera DataFrameSchema object to convert.
 +         pandera_system: Optional pre-instantiated PanderaTypeSystem.
 +         pydantic_system: Optional pre-instantiated PydanticTypeSystem.
-+ 
++
 +     Returns:
 +         A dynamically created Pydantic BaseModel class.
-+ 
++
 +     Raises:
 +         PolitipoError: If Pydantic or Pandera libraries are not installed.
 +         TypeError: If 'schema' is not a Pandera DataFrameSchema instance.
@@ -8913,32 +8913,32 @@ I'll help implement the schema tools module. Let me create the new files and mak
 +         raise PolitipoError("Pandera is required for pandera_to_pydantic_model conversion.")
 +     if not isinstance(schema, pa.DataFrameSchema):
 +         raise TypeError(f"Input 'schema' must be a Pandera DataFrameSchema instance, got {type(schema)}")
-+ 
++
 +     try:
 +         _pyd_sys = pydantic_system or PydanticTypeSystem()
 +         _pa_sys = pandera_system or PanderaTypeSystem()
 +     except PolitipoError as e:
 +         raise PolitipoError(f"Failed to initialize required type systems: {e}") from e
-+ 
++
 +     try:
 +         # Convert Pandera schema object to CanonicalType
 +         # This relies on PanderaTypeSystem.to_canonical handling DataFrameSchema instances
 +         canonical_schema = _pa_sys.to_canonical(schema)
-+ 
++
 +         # Ensure it's a composite type
 +         if canonical_schema.kind != "composite":
 +             raise ConversionError(f"Pandera schema '{schema.name}' did not resolve to a composite canonical type.")
-+ 
++
 +         # Convert CanonicalType back to a Pydantic model class
 +         # This relies on PydanticTypeSystem.from_canonical being implemented correctly
 +         pydantic_model_class = _pyd_sys.from_canonical(canonical_schema)
-+ 
++
 +         # Validate the output type
 +         if not (isinstance(pydantic_model_class, type) and issubclass(pydantic_model_class, BaseModel)):
 +             raise ConversionError(f"Pydantic system did not return a BaseModel subclass from canonical schema {canonical_schema.name}. Got: {type(pydantic_model_class)}")
-+ 
++
 +         return pydantic_model_class
-+ 
++
 +     except NotImplementedError as nie:
 +         # Specific feedback if from_canonical is the blocker
 +         raise NotImplementedError(f"Conversion requires PydanticTypeSystem.from_canonical implementation for composite types: {nie}") from nie
@@ -8948,8 +8948,8 @@ I'll help implement the schema tools module. Let me create the new files and mak
 +     except Exception as e:
 +         # Wrap unexpected errors
 +         raise ConversionError(f"Unexpected error during Pandera -> Pydantic schema conversion for schema '{schema.name}': {e}") from e
-+ 
-+ # TODO: Consider adding similar functions for SeriesSchema <-> Pydantic Field/Type if needed. 
++
++ # TODO: Consider adding similar functions for SeriesSchema <-> Pydantic Field/Type if needed.
 ```
 
 ---
@@ -8966,7 +8966,7 @@ Now, let's update the main `__init__.py` file to expose these new functions:
 + except ImportError:
 +     _HAS_PANDERA = False
 +     PanderaTypeSystem = None  # Define as None if import fails
-+ 
++
 + # Optional schema tools
 + try:
 +     # Only try importing if dependencies are met
@@ -8982,11 +8982,11 @@ Now, let's update the main `__init__.py` file to expose these new functions:
 +     # Define dummies if needed for type checking elsewhere, though __all__ controls export
 +     def pydantic_to_pandera_schema(*args, **kwargs): raise ImportError("Missing dependencies for schema_tools")
 +     def pandera_to_pydantic_model(*args, **kwargs): raise ImportError("Missing dependencies for schema_tools")
-+ 
-  
++
+
   __all__ = [
   ]
-  
+
 - # Add optional type systems if available
 - if HAS_PANDERA:
 + # Add optional type systems and tools if available
@@ -9041,7 +9041,7 @@ Would you like me to add any additional features or make any adjustments to the 
 
 _**User**_
 
-can you please test the schema tools by adding code to @main.py 
+can you please test the schema tools by adding code to @main.py
 
 ---
 
@@ -9056,15 +9056,15 @@ I'll add code to test both schema translation functions using the existing `User
   import pandas as pd
 + from politipo import pydantic_to_pandera_schema, pandera_to_pydantic_model
 + import pandera as pa
-  
-  
+
+
       addresses: List[Address]
-  
-+ 
+
++
 + def test_schema_tools():
 +     """Test the schema translation functions."""
 +     print("\n=== Testing Schema Translation Tools ===\n")
-+ 
++
 +     # Test 1: Pydantic to Pandera conversion
 +     print("Test 1: Converting Pydantic User model to Pandera schema...")
 +     try:
@@ -9078,7 +9078,7 @@ I'll add code to test both schema translation functions using the existing `User
 +             print(f"    - nullable: {col.nullable}")
 +             if col.checks:
 +                 print(f"    - checks: {[check.name for check in col.checks]}")
-+ 
++
 +         # Create a test DataFrame that should pass validation
 +         test_df = pd.DataFrame({
 +             "name": ["Alice Smith"],
@@ -9087,11 +9087,11 @@ I'll add code to test both schema translation functions using the existing `User
 +             "created_at": [datetime.now()],
 +             "addresses": [[{"street": "123 Main St", "city": "New York", "country": "US"}]]
 +         })
-+ 
++
 +         print("\nValidating test DataFrame with generated schema...")
 +         validated_df = pandera_schema.validate(test_df)
 +         print("✓ Validation successful!")
-+ 
++
 +         # Test 2: Convert the Pandera schema back to a Pydantic model
 +         print("\nTest 2: Converting Pandera schema back to Pydantic model...")
 +         regenerated_model = pandera_to_pydantic_model(pandera_schema)
@@ -9104,21 +9104,21 @@ I'll add code to test both schema translation functions using the existing `User
 +             print(f"    - required: {field.required}")
 +             if field.field_info.description:
 +                 print(f"    - description: {field.field_info.description}")
-+ 
++
 +         # Test the regenerated model with the same data
 +         print("\nValidating data with regenerated Pydantic model...")
 +         instance = regenerated_model(**test_df.iloc[0].to_dict())
 +         print("✓ Validation successful!")
 +         print(f"Created instance: {instance}")
-+ 
++
 +     except NotImplementedError as nie:
 +         print(f"\nImplementation incomplete: {nie}")
 +     except PolitipoError as pe:
 +         print(f"\nPolitipo error: {pe}")
 +     except Exception as e:
 +         print(f"\nUnexpected error: {e}")
-+ 
-  
++
+
   def main():
   if __name__ == "__main__":
       main()
@@ -9200,42 +9200,42 @@ I see that the `OneOf` constraint class is missing from the constraints module. 
   from decimal import Decimal, InvalidOperation
   import re
           return cls(value=data["value"])
-  
-+ 
+
++
 + @dataclass(frozen=True)
 + class OneOf(Constraint):
 +     """Constraint that ensures a value is one of a set of allowed values."""
 +     allowed_values: List[Any]
-+ 
++
 +     def __post_init__(self):
 +         if not isinstance(self.allowed_values, (list, tuple, set)):
 +             raise TypeError(f"OneOf requires a sequence of allowed values, got {type(self.allowed_values)}")
 +         if not self.allowed_values:
 +             raise ValueError("OneOf requires at least one allowed value")
-+ 
++
 +     def validate(self, val: Any) -> bool:
 +         if val not in self.allowed_values:
 +             raise ConstraintViolationError(
 +                 f"Value {val} is not one of the allowed values: {self.allowed_values}"
 +             )
 +         return True
-+ 
++
 +     def to_dict(self) -> Dict[str, Any]:
 +         return {"type": "one_of", "allowed_values": list(self.allowed_values)}
-+ 
++
 +     @classmethod
 +     def from_dict(cls, data: Dict[str, Any]) -> "OneOf":
 +         if "allowed_values" not in data:
 +             raise ValueError("OneOf requires 'allowed_values' parameter")
 +         return cls(allowed_values=data["allowed_values"])
-+ 
-  
++
+
   # Registry for constraint deserialization
       "pattern": Pattern,
       "multiple_of": MultipleOf,
 +     "one_of": OneOf,
   }
-  
+
 ```
 
 ---
@@ -9380,7 +9380,7 @@ I see that `OneOf` is not exported in the core types module. Let me fix that:
       "MultipleOf",
 +     "OneOf",
       "constraint_from_dict"
-  ] 
+  ]
 ```
 
 ---
@@ -9438,7 +9438,7 @@ I see that we need to add support for `OneOf` in the Pydantic plugin's constrain
 ---
 
 ```diff
-  
+
       def _constraints_to_field_kwargs(self, constraints: Dict[str, Constraint]) -> Dict[str, Any]:
 -         """Convert core constraints back to Pydantic Field kwargs."""
 +         """Convert constraints back to Pydantic field kwargs."""
@@ -9497,11 +9497,11 @@ Let me try that edit again:
 ---
 
 ```diff
-  
+
           # Common attributes/metadata keys
 -         constraint_keys = ['gt', 'ge', 'lt', 'le', 'min_length', 'max_length', 'pattern', 'multiple_of']
 +         constraint_keys = ['gt', 'ge', 'lt', 'le', 'min_length', 'max_length', 'pattern', 'multiple_of', 'allowed_values']
-  
+
           # Pydantic v2: Constraints often in metadata or direct attributes
                        if value is not None and value is not PydanticUndefined:
                             constraint_cls = _PYDANTIC_CONSTRAINT_MAP[key]
@@ -9509,7 +9509,7 @@ Let me try that edit again:
 +                               constraints[constraint_cls.__name__] = constraint_cls(allowed_values=value)
 +                           else:
                                 constraints[constraint_cls.__name__] = constraint_cls(value=value)
-  
+
                          if value is not None:
                               constraint_cls = _PYDANTIC_CONSTRAINT_MAP[key]
 +                             if key == 'allowed_values':
@@ -9543,7 +9543,7 @@ Let me try that edit again:
 +                          constraints['Pattern'] = Pattern(pattern=constraint.pattern)
 +                      elif hasattr(constraint, 'multiple_of'):
 +                          constraints['MultipleOf'] = MultipleOf(value=constraint.multiple_of)
-  
+
           return constraints
 ```
 
@@ -9788,7 +9788,7 @@ Here's what we need to do to fix this:
 
 ```diff
       print("\n=== Testing Schema Translation Tools ===\n")
-  
+
 -     # Test 1: Pydantic to Pandera conversion
 -     print("Test 1: Converting Pydantic User model to Pandera schema...")
 +     # Create a flattened version of User model for Pandera testing
@@ -9798,7 +9798,7 @@ Here's what we need to do to fix this:
 +         age: int = Field(..., ge=0, le=150)
 +         email: Optional[str] = Field(None, pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 +         created_at: datetime
-+ 
++
 +     print("Test 1: Converting flattened Pydantic User model to Pandera schema...")
       try:
 -         pandera_schema = pydantic_to_pandera_schema(User)
@@ -9809,7 +9809,7 @@ Here's what we need to do to fix this:
               "created_at": [datetime.now()],
 -             "addresses": [[{"street": "123 Main St", "city": "New York", "country": "US"}]]
           })
-  
+
 ```
 
 ---
@@ -9929,7 +9929,7 @@ Let me fix this by modifying the constraint handling in the Pandera type system:
 +                     constraint_dict = {constraint_name: tuple(sorted(constraint_data.items()))}
 +                 else:
 +                     constraint_dict = {constraint_name: constraint_data}
-+                 
++
 +                 constraint = constraint_from_dict(constraint_dict)
                   if constraint:
                       check = self._constraint_to_pandera_check(constraint)
@@ -9952,7 +9952,7 @@ Let's also update the `_canonical_to_dataframe` method to use the same fix:
 +                             constraint_dict = {constraint_name: tuple(sorted(constraint_data.items()))}
 +                         else:
 +                             constraint_dict = {constraint_name: constraint_data}
-+                         
++
 +                         constraint = constraint_from_dict(constraint_dict)
                           if constraint:
                               check = self._constraint_to_pandera_check(constraint)
@@ -9994,4 +9994,3 @@ Read file: /home/runner/workspace/politipo/core/types/constraints.py
 
 
 ---
-

@@ -4,7 +4,7 @@
 
 _**User**_
 
-@politipo @ABOUT_POLITIPO.md 
+@politipo @ABOUT_POLITIPO.md
 
 Plesae understand deeply the codebase and help me apply:
 
@@ -2748,7 +2748,7 @@ Would you like me to help implement these changes?
 
 _**User**_
 
-check output again please 
+check output again please
 
 ---
 
@@ -2855,4 +2855,3 @@ Would you like me to help implement these changes? This should resolve the circu
 
 
 ---
-

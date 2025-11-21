@@ -30,7 +30,7 @@ class DictToModelStrategy(ConversionStrategy):
         # Get model class using the target type system and canonical type
         if not context.target_type_system:
             raise ConversionError("Target type system not found in context for DictToModelStrategy")
-        
+
         try:
             model_class = context.target_type_system.from_canonical(context.target)
             if not isinstance(model_class, type):
@@ -104,7 +104,7 @@ I'll look at the code base to understand the context better before making change
 
 <details>
             <summary>Searched codebase "politipo/core/conversion/strategies/dict_to_model.py" • **2** results</summary>
-        
+
 | File |
 |------|
 | `undefined` |
@@ -120,7 +120,7 @@ Read file: /home/runner/workspace/politipo/core/conversion/strategies/dict_to_mo
 
 <details>
             <summary>Searched codebase "politipo/core/conversion/utils.py" • **2** results</summary>
-        
+
 | File |
 |------|
 | `undefined` |
@@ -147,14 +147,14 @@ Read file: /home/runner/workspace/politipo/core/conversion/utils/__init__.py
               raise ConversionError(f"Failed to create model instance of {model_class.__name__}: {e}")
               # Use parse_obj for v1 strict (if available), **kwargs for v1 non-strict
               pyd_version = get_pydantic_version()
-+ 
++
 +             # Filter data to only include fields defined in the model
 +             if pyd_version == 2:
 +                 valid_field_names = getattr(model_class, 'model_fields', {}).keys()
 +             else:  # Pydantic v1
 +                 valid_field_names = getattr(model_class, '__fields__', {}).keys()
 +             filtered_data = {k: v for k, v in data.items() if k in valid_field_names}
-+ 
++
               if pyd_version == 2:
                   if strict:
                       # model_validate performs validation
@@ -177,7 +177,7 @@ Read file: /home/runner/workspace/politipo/core/conversion/utils/__init__.py
 -                     filtered_data = {k: v for k, v in data.items() if k in valid_field_names}
 +                     # Direct **kwargs instantiation
                       return model_class(**filtered_data)
-  
+
           except Exception as e:
 -             # This block might become less necessary with model_construct/filtering above,
 -             # but keep as a final safety net if direct **kwargs fails in v1 non-strict.
@@ -186,8 +186,8 @@ Read file: /home/runner/workspace/politipo/core/conversion/utils/__init__.py
 -                 raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}") from e
 -             else:
 -                 # If even filtering + construction failed in non-strict, raise with context
--                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e 
-+             raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}") from e 
+-                 raise ConversionError(f"Non-strict creation failed for {model_class.__name__} after filtering: {e}") from e
++             raise ConversionError(f"Failed to create {model_class.__name__} instance: {e}") from e
 ```
 
 ---
@@ -304,7 +304,7 @@ I'll implement the requested changes to the `_canonical_to_dtype` method in the 
 
 <details>
             <summary>Searched codebase "politipo/plugins/pandas/types.py" • **1** results</summary>
-        
+
 | File |
 |------|
 | `undefined` |
@@ -323,7 +323,7 @@ Let's find the existing `_canonical_to_dtype` method to understand its current i
 
 <details>
             <summary>Grep search for "def _canonical_to_dtype" • **4** files</summary>
-        
+
 | File | Line | Match |
 |------|------|-------|
 | `vscode-remote://ssh-remote%2Bbb8ae998-9d3f-40f1-82c0-394f0933d18a@bb8ae998-9d3f-40f1-82c0-394f0933d18a-00-19oa4jwe6j4k1.janeway.replit.dev:22/home/runner/workspace/.specstory/history/2025-03-28_16-14-refining-create-model-instance-for-efficiency.md` | L214 | `def _canonical_to_dtype(self, canonical: CanonicalType) -> Union[np.dtype, pd.api.extensions.ExtensionDtype, str]:` |
@@ -355,10 +355,10 @@ Now I'll implement the requested changes to the `_canonical_to_dtype` method:
 -                 if isinstance(item_dtype, pd.api.extensions.ExtensionDtype):
 -                      # If inner type is nullable, use object for categories
 -                      np_item_dtype = np.object_
-+                 
++
 +                 # Determine if the item type is a Pandas ExtensionDtype
 +                 is_extension_dtype = isinstance(item_dtype, pd.api.extensions.ExtensionDtype)
-+ 
++
 +                 # Select np_item_dtype based on item_dtype and use_nullable_dtypes:
 +                 if is_extension_dtype and use_nullable_dtypes:
 +                     # If the inner type is a nullable ExtensionDtype AND we're using nullable dtypes generally,
@@ -367,7 +367,7 @@ Now I'll implement the requested changes to the `_canonical_to_dtype` method:
                   else:
 +                     # Otherwise, use item_dtype (might still be np.int64, np.float64, etc.)
                       np_item_dtype = item_dtype
-  
+
 ```
 
 ---
@@ -510,7 +510,7 @@ I'll search for the file and implement the requested changes.
 
 <details>
             <summary>Searched codebase "politipo/plugins/pandera/types.py" • **1** results</summary>
-        
+
 | File |
 |------|
 | `undefined` |
@@ -529,7 +529,7 @@ Let me find the exact `_dataframe_to_canonical` method in the file to make the r
 
 <details>
             <summary>Grep search for "def _dataframe_to_canonical" • **1** files</summary>
-        
+
 | File | Line | Match |
 |------|------|-------|
 | `vscode-remote://ssh-remote%2Bbb8ae998-9d3f-40f1-82c0-394f0933d18a@bb8ae998-9d3f-40f1-82c0-394f0933d18a-00-19oa4jwe6j4k1.janeway.replit.dev:22/home/runner/workspace/politipo/plugins/pandera/types.py` | L174 | `def _dataframe_to_canonical(self, schema: Union[pa.DataFrameSchema, Type[DataFrame]]) -> CanonicalType:` |
@@ -577,7 +577,7 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 -                         series_kwargs['coerce'] = column.coerce
 -                     if hasattr(column, 'name'):
 -                         series_kwargs['name'] = name
--                     
+-
 -                     series_schema = pa.SeriesSchema(**series_kwargs)
 -                     # Convert series schema to canonical type
 -                     column_canon = self._series_to_canonical(series_schema)
@@ -592,10 +592,10 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 -             else:
 -                 # Use existing schema if available (unlikely with current Pandera versions)
 -                 column_canon = self._series_to_canonical(column.schema)
-- 
+-
 -             # Extract field constraints
 -             field_constraints = {}
--             
+-
 -             # Basic constraints
 -             if column.nullable is not None:
 -                 field_constraints["nullable"] = column.nullable
@@ -605,29 +605,29 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 -                 field_constraints["coerce"] = column.coerce
 -             if hasattr(column, 'regex') and column.regex is not None:
 -                 field_constraints["pattern"] = column.regex
-- 
+-
 -             # Validation checks
 -             if column.checks:
 -                 for check in column.checks:
 -                     constraint = self._pandera_check_to_constraint(check)
 -                     if constraint:
 -                         field_constraints.update(constraint.to_dict())
-- 
+-
 -             # Add field entry
 +             try:
 +                 # Convert each Column, creating a SeriesSchema or using existing schema
 +                 series_kwargs = {}
-+ 
++
 +                 # Only pass attributes that exist, defaulting to None
 +                 series_kwargs['dtype'] = getattr(column, 'dtype', None)
 +                 series_kwargs['checks'] = getattr(column, 'checks', None)
 +                 series_kwargs['nullable'] = getattr(column, 'nullable', None)
 +                 series_kwargs['coerce'] = getattr(column, 'coerce', None)
 +                 series_kwargs['name'] = name
-+ 
++
 +                 series_schema = pa.SeriesSchema(**{k: v for k, v in series_kwargs.items() if v is not None})
 +                 column_canon = self._series_to_canonical(series_schema)
-+ 
++
 +             except Exception as e:
 +                 print(f"Warning: Failed to create SeriesSchema for column '{name}': {e}")
 +                 column_canon = CanonicalType(
@@ -635,7 +635,7 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 +                     name=self._map_dtype_to_canonical(str(getattr(column, 'dtype', "object"))),  # Handle missing dtype
 +                     meta=TypeMeta(data={"pandas_dtype": str(getattr(column, 'dtype', "object"))})
 +                 )
-+ 
++
 +             # --- Consolidated Constraint Handling ---
 +             field_constraints = {
 +                 "nullable": getattr(column, "nullable", None),
@@ -646,7 +646,7 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 +             }
 +             field_constraints = {k: v for k, v in field_constraints.items() if v is not None}  # Remove None values
 +             # --- End Consolidated Constraint Handling ---
-+ 
++
               fields[name] = {
                   "type": column_canon,
 -                 "required": not column.nullable if column.nullable is not None else True,
@@ -654,7 +654,7 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
                   "constraints": field_constraints,
                   "description": getattr(column, "description", None)
               }
-  
+
 -         # Add DataFrame-level constraints
 -         if schema.unique_column_names is not None:
 -             meta_data["unique_column_names"] = schema.unique_column_names
@@ -664,7 +664,7 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 -             meta_data["strict"] = schema.strict
 -         if schema.ordered is not None:
 -             meta_data["ordered"] = schema.ordered
-- 
+-
 -         # Add custom metadata
 -         if hasattr(schema, "metadata") and schema.metadata:
 -             meta_data["custom_metadata"] = schema.metadata
@@ -673,10 +673,10 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 +             value = getattr(schema, key, None)
 +             if value is not None:
 +                 meta_data[key] = value
-  
+
           return CanonicalType(
           )
-  
+
 +     def _extract_checks_as_constraints(self, checks: Optional[List[pa.Check]]) -> Dict[str, Any]:
 +         """Helper to extract constraints from a list of Pandera checks."""
 +         constraints = {}
@@ -686,7 +686,7 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 +                 if constraint:
 +                     constraints.update(constraint.to_dict())
 +         return constraints
-+ 
++
       def _get_canonical_cache_key(self, canonical: CanonicalType) -> str:
           """Create a hashable key for a CanonicalType object."""
 ```
@@ -695,7 +695,7 @@ Now I will implement the requested changes to the `_dataframe_to_canonical` meth
 
 I've successfully refactored the `_dataframe_to_canonical` method in the `politipo/plugins/pandera/types.py` file as requested. Here are the key improvements made:
 
-1. **Standardized Property Extraction**: 
+1. **Standardized Property Extraction**:
    - Replaced multiple `hasattr`/`getattr` pairs with direct `getattr(column, 'attribute', None)` calls with default values
    - Standardized attribute access across all properties
 
@@ -919,4 +919,3 @@ By implementing these refinements, you make the `SQLModelTypeSystem` more robust
 
 
 ---
-

@@ -25,7 +25,7 @@ pip install politipo
 ```
 
 ### Requirements
-- Python 3.11 or higher
+- Python 3.14 or higher
 - Additional dependencies (e.g., `pydantic`, `sqlmodel`, `sqlalchemy`, `pandas`, `polars`) may be required depending on the conversions you perform. These will be dynamically imported as needed.
 
 ---
@@ -492,3 +492,82 @@ Below is an updated Markdown table that includes all available combinations of `
    - The ❌ entries show examples of inputs that would fail, with "N/A" for outputs since they aren't produced.
    - Unsupported conversions will raise a specific ValueError with a descriptive message explaining the issue.
    - The error messages clearly indicate whether the source type (`from_type`) or target type (`to_type`) is unsupported.
+
+---
+
+## Development
+
+This project uses uv for dependency management and ruff/black/ty for quality.
+
+### Setup
+
+1) Install uv (see https://docs.astral.sh/uv/)
+2) Sync dev dependencies:
+
+```
+uv sync --group dev
+```
+
+### Common tasks
+
+```
+# Lint
+uv run ruff check .
+
+# Auto-fix lint
+uv run ruff check . --fix
+
+# Format
+uv run black .
+
+# Format check
+uv run black --check .
+
+# Type-check (ty)
+uv run ty
+
+# Run tests against src/
+PYTHONPATH=src uv run pytest -q src
+```
+
+### Pre-commit
+
+Install and run local hooks:
+
+```
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
+
+### CI
+
+GitHub Actions (Python 3.14) runs: ruff, black --check, ty, and pytest with `PYTHONPATH=src`.
+
+---
+
+## Makefile
+
+For convenience, common tasks are available via `make`:
+
+```
+# One-time: install dev deps (uses a PyO3 3.14 compatibility env var)
+make sync
+
+# Quality
+make lint
+make fix
+make fmt
+make fmt-check
+make type
+
+# Tests (targets src/ by default)
+make test
+
+# Pre-commit hooks
+make pre-commit
+```
+
+Note: On Python 3.14, pydantic-core builds via PyO3 may need the
+`PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` environment variable. The Makefile and CI
+set this automatically. If you still encounter build issues on 3.14, consider
+using Python 3.13 temporarily until upstream packages fully support 3.14.
