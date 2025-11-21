@@ -25,7 +25,7 @@ pip install politipo
 ```
 
 ### Requirements
-- Python 3.14 or higher
+- Python 3.13+ for local dev (CI also tests 3.14)
 - Additional dependencies (e.g., `pydantic`, `sqlmodel`, `sqlalchemy`, `pandas`, `polars`) may be required depending on the conversions you perform. These will be dynamically imported as needed.
 
 ---
@@ -528,6 +528,42 @@ uv run ty
 
 # Run tests against src/
 PYTHONPATH=src uv run pytest -q src
+```
+
+## Repository Layout
+
+- New library: `src/politipo.py` with tests under `src/`.
+- Legacy code and examples: `legacy/` (excluded from lint/CI packaging scope).
+
+## Install With uv Only
+
+- Base install (minimal deps):
+```
+uv pip install .
+```
+
+- Install extras only when needed:
+```
+# Arrow/Parquet
+uv pip install '.[arrow]'
+
+# Polars
+uv pip install '.[polars]'
+
+# DuckDB
+uv pip install '.[duckdb]'
+
+# Validation (Pandera) and optional Pandas fallback
+uv pip install '.[validation]'
+uv pip install '.[pandas]'
+
+# Everything
+uv pip install '.[all]'
+```
+
+Or in a synced dev environment:
+```
+uv sync --group dev
 ```
 
 ### Pre-commit
