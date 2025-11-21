@@ -530,7 +530,11 @@ class QualityGate:
     @staticmethod
     def generate_schema(model: type[BaseModel], backend="polars") -> Any:
         if not PANDERA_AVAILABLE:
-            raise ImportError("Pandera is not installed. Install with 'pip install pandera'")
+            # Suggest installing validation extra via uv
+            raise ImportError(
+                "Missing optional dependency 'pandera'.\n"
+                "Install with: uv pip install '.[validation]'"
+            )
 
         columns = {}
         for name, field in model.model_fields.items():
@@ -548,6 +552,18 @@ class QualityGate:
                 checks.append(pandera.Check.le(constraints["le"]))
             if "pattern" in constraints:
                 checks.append(pandera.Check.str_matches(constraints["pattern"]))
+            # String length constraints
+            if "min_length" in constraints or "max_length" in constraints:
+                checks.append(
+                    pandera.Check.str_length(
+                        min_value=constraints.get("min_length"),
+                        max_value=constraints.get("max_length"),
+                    )
+                )
+            # multiple_of for numeric
+            if "multiple_of" in constraints:
+                n = constraints["multiple_of"]
+                checks.append(pandera.Check(lambda s, n=n: (s % n == 0)))
 
             # Map Type roughly for Pandera
             # Note: Pandera Polars backend infers type mostly from
@@ -585,6 +601,12 @@ class QualityGate:
                 c["le"] = meta.le
             if hasattr(meta, "pattern"):
                 c["pattern"] = meta.pattern
+            if hasattr(meta, "min_length"):
+                c["min_length"] = meta.min_length
+            if hasattr(meta, "max_length"):
+                c["max_length"] = meta.max_length
+            if hasattr(meta, "multiple_of"):
+                c["multiple_of"] = meta.multiple_of
         return c
 
     @staticmethod
@@ -653,7 +675,9 @@ class PolyTransporter:
         Handles UUID binary conversion and Enum integer encoding efficiently.
         """
         if not ARROW_AVAILABLE:
-            raise ImportError("PyArrow not installed")
+            raise ImportError(
+                "Missing optional dependency 'pyarrow'.\nInstall with: uv pip install '.[arrow]'"
+            )
         if not objects:
             return pa.Table.from_pylist([], schema=self.arrow_schema)
 
@@ -690,7 +714,9 @@ class PolyTransporter:
         Optionally runs Pandera Quality Gate.
         """
         if not POLARS_AVAILABLE:
-            raise ImportError("Polars not installed")
+            raise ImportError(
+                "Missing optional dependency 'polars'.\nInstall with: uv pip install '.[polars]'"
+            )
 
         arrow_table = self.to_arrow(objects)
         df = pl.from_arrow(arrow_table)
@@ -722,7 +748,9 @@ class PolyTransporter:
         High-Speed Ingestion into DuckDB via Arrow Bridge.
         """
         if not DUCKDB_AVAILABLE:
-            raise ImportError("DuckDB not installed")
+            raise ImportError(
+                "Missing optional dependency 'duckdb'.\nInstall with: uv pip install '.[duckdb]'"
+            )
 
         arrow_tbl = self.to_arrow(objects)
         # Register the Arrow table, then ingest
@@ -753,6 +781,69 @@ def to_polars(objects: list[BaseModel], validate: bool = True) -> Any:
     if not objects:
         return None
     return PolyTransporter(type(objects[0])).to_polars(objects, validate=validate)
+
+
+# --- 6a. UX Helpers (Extras Loader & Fluent Pipeline) ---
+
+_EXTRA_HINT = {
+    "arrow": "pyarrow",
+    "polars": "polars",
+    "duckdb": "duckdb",
+    "validation": "pandera",
+    "pandas": "pandas",
+    "sqlalchemy": "sqlalchemy",
+}
+
+
+def require(extra: str) -> None:
+    """Ensure an optional extra is available or raise a helpful ImportError.
+
+    Usage: require("polars") will suggest: uv pip install '.[polars]'
+    """
+    name = _EXTRA_HINT.get(extra, extra)
+    msg = f"Missing optional dependency '{name}'.\nInstall with: uv pip install '.[{extra}]'"
+    if extra == "arrow" and not ARROW_AVAILABLE:
+        raise ImportError(msg)
+    if extra == "polars" and not POLARS_AVAILABLE:
+        raise ImportError(msg)
+    if extra == "duckdb" and not DUCKDB_AVAILABLE:
+        raise ImportError(msg)
+    if extra == "validation" and not PANDERA_AVAILABLE:
+        raise ImportError(msg)
+    if extra == "sqlalchemy" and not SQL_AVAILABLE:
+        raise ImportError(msg)
+
+
+class Pipeline:
+    def __init__(self, model_cls: type[BaseModel], objects: list[BaseModel]):
+        self.model_cls = model_cls
+        self.objects = objects
+        self._arrow = None
+        self._df = None
+        self._transporter = PolyTransporter(model_cls)
+
+    def to_arrow(self) -> Pipeline:
+        self._arrow = self._transporter.to_arrow(self.objects)
+        return self
+
+    def to_duckdb(self, con: Any, table_name: str) -> Pipeline:
+        self._transporter.ingest_duckdb(con, table_name, self.objects)
+        return self
+
+    def to_polars(self, validate: bool = True) -> Any:
+        self._df = self._transporter.to_polars(self.objects, validate=validate)
+        return self._df
+
+
+def from_models(objects: list[BaseModel]) -> Pipeline:
+    if not objects:
+        raise ValueError("from_models requires a non-empty list of models")
+    return Pipeline(type(objects[0]), objects)
+
+
+def pipeline(objects: list[BaseModel]) -> Pipeline:
+    """Alias for from_models for a slightly shorter fluent entrypoint."""
+    return from_models(objects)
 
 
 # --- 6. Validation & Demo ---

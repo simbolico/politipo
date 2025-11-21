@@ -76,6 +76,65 @@ df = pt.to_polars(rows, validate=True)
 print(df)
 ```
 
+## Why This Is SotA
+
+- Define once with Pydantic v2 + Annotated metadata.
+- Zero-copy transport via Arrow (UUID as 16-byte binary; vectors as FixedSizeList).
+- Vectorized data quality via Pandera (Polars backend, robust Pandas fallback).
+- Query anywhere: DuckDB/Polars, with Kùzu DDL mapping support.
+- Lean installs: base is tiny; extras installed only when needed via uv.
+
+## Install Matrix (uv)
+
+- Base: `uv pip install .` (pydantic only)
+- Arrow/Parquet: `uv pip install '.[arrow]'`
+- Polars: `uv pip install '.[polars]'`
+- DuckDB: `uv pip install '.[duckdb]'`
+- Validation (Pandera): `uv pip install '.[validation]'`
+- Pandas fallback for validation: `uv pip install '.[pandas]'`
+- SQLAlchemy types (optional): `uv pip install '.[sqlalchemy]'`
+- All extras: `uv pip install '.[all]'`
+
+## API Overview
+
+- Precision: `Annotated[Decimal, pt.Precision(p, s)]` → Arrow decimal128, DuckDB DECIMAL(p,s)
+- Vector[N]: `pt.Vector[N]` → Arrow FixedSizeList(float32, N); DuckDB FLOAT[N]
+- Resolver → Specs: Maps model fields to TypeSpecs (String/Int/Float/Bool/UUID/Decimal/List/Struct/Enum)
+- PolyTransporter:
+  - `to_arrow(models)` → `pyarrow.Table`
+  - `to_polars(models, validate=True)` → `polars.DataFrame`
+  - `ingest_duckdb(con, table, models)` → insert via Arrow
+  - `generate_ddl(dialect, table)` → DuckDB/Kùzu/portable SQL
+- QualityGate:
+  - `generate_schema(model, backend='polars'|'pandas')` → Pandera schema
+  - Extracts gt/ge/lt/le/pattern, min_length/max_length, multiple_of
+- Pipeline (fluent):
+  - `pt.from_models(rows).to_arrow().to_duckdb(con, 'tbl').to_polars(validate=True)`
+
+## Recipes
+
+- Financial decimals: `Precision(38, 18)` for high-precision columns; DuckDB DECIMAL(38,18).
+- Embeddings: `Vector[1536]` stored as FixedSizeList(float32, 1536); Arrow-friendly for RAG.
+- Enums as dictionary: memory-efficient encoded storage via Arrow dictionary type.
+- Kùzu DDL: `generate_ddl('kuzu', 'Node')` produces STRUCT-based Node table schema with PK.
+
+## Missing-Extras UX
+
+If a dependency is missing, you’ll see a helpful error:
+
+```
+Missing optional dependency 'pyarrow'.
+Install with: uv pip install '.[arrow]'
+```
+
+## Benchmarks (excerpt)
+
+- UUID binary vs string UUIDs: smaller footprint, faster scans.
+- Enums as dictionary vs strings: reduced RAM.
+- Arrow → DuckDB ingest: high throughput via Arrow bridge.
+
+Run local benchmarks with uv, then compare using your data shape. (Optional scripts incoming.)
+
 ---
 
 ## Features
