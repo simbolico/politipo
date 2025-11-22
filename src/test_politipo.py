@@ -914,5 +914,80 @@ def test_pipeline_write_parquet(tmp_path, sample_data):
     assert path.exists() and path.stat().st_size > 0
 
 
+# --- 8. Coverage Gap Tests ---
+
+
+def test_resolve_union_multiple_types_with_none():
+    # Covers 505->510 (else branch of len(non_none) == 1)
+    # Union[int, str, None] -> non_none has 2 elements
+    spec = pt._RESOLVER.resolve(int | str | None)
+    # Should fall through to fallback (StringSpec)
+    assert isinstance(spec, pt.StringSpec)
+    assert spec.nullable is True
+
+
+def test_resolve_annotated_nested_field_info():
+    # Covers 487->492 and 490
+    # Annotated with nested FieldInfo in metadata
+    # This is a bit artificial but simulates complex metadata
+
+    # Subclass FieldInfo to allow extra attributes or define them in class
+    class MyFieldInfo(FieldInfo):
+        primary_key: bool = True
+
+    fi_inner = MyFieldInfo()
+
+    class MockFI:
+        metadata = [fi_inner]
+
+        def is_required(self):
+            return True
+
+    spec = pt._RESOLVER.resolve(int, MockFI())
+    assert spec.is_pk is True
+
+
+def test_resolve_annotated_vector_branches():
+    # Covers 525->529, 526->525
+    # Annotated[list[int], "vector"] without dimension -> should skip
+    MyVec = Annotated[list[int], "vector"]
+    spec = pt._RESOLVER.resolve(MyVec)
+    # Should fall back to ListSpec
+    assert isinstance(spec, pt.ListSpec)
+
+    # Annotated[list, "vector", 4] -> handled by existing tests
+
+
+def test_resolve_annotated_decimal_branches():
+    # Covers 530->534, 531->530
+    # Annotated[Decimal, "something_else"] -> should skip Precision check
+    MyDec = Annotated[decimal.Decimal, "not_precision"]
+    spec = pt._RESOLVER.resolve(MyDec)
+    # Should be default DecimalSpec
+    assert isinstance(spec, pt.DecimalSpec)
+    assert spec.p == 18  # Default
+
+
+def test_resolve_field_info_is_required_type_error():
+    # Covers 517, 520-522
+    # Annotated with FieldInfo that raises TypeError on is_required
+
+    class BrokenFieldInfo(FieldInfo):
+        def is_required(self):
+            raise TypeError("boom")
+
+    # We need to wrap it in Annotated
+    # But resolve unwraps Annotated and iterates metadata
+    # 514: for m in meta:
+    # 515:    if isinstance(m, FieldInfo):
+
+    bfi = BrokenFieldInfo()
+    MyType = Annotated[int, bfi]
+
+    spec = pt._RESOLVER.resolve(MyType)
+    # Should not crash, just ignore is_required
+    assert isinstance(spec, pt.IntegerSpec)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-v", __file__]))

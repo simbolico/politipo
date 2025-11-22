@@ -80,7 +80,7 @@ publish:
 
 release: test build
 	@echo "Tagging release..."
-	@export gittag=v$$(rg -n "^version\s*=\s*\"(.*)\"" -o -r '$$1' pyproject.toml | head -1); \
+	@export gittag=v$$(rg "^version\s*=\s*\"(.*)\"" -o -r '$$1' pyproject.toml | head -1); \
 	git add -A && git commit -m "chore(release): $$gittag" || true; \
 	git tag -a "$$gittag" -m "Release $$gittag" || true; \
 	echo "Run 'git push --follow-tags' to publish the tag";

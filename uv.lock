@@ -307,19 +307,18 @@ wheels = [
 
 [[package]]
 name = "pandera"
-version = "0.23.1"
+version = "0.26.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
     { name = "packaging" },
-    { name = "pandas" },
     { name = "pydantic" },
     { name = "typeguard" },
+    { name = "typing-extensions" },
     { name = "typing-inspect" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/1a/bcb3daa41bf6a46dc7c218cb0558922f1e711176bbb4ce649ed610a35f3f/pandera-0.23.1.tar.gz", hash = "sha256:2afed504ad61bbd2960dc7f85dd6be0b28d230a626f392b8ba05c291b970ae06", size = 513325, upload-time = "2025-03-08T02:25:29.404Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/0b/bb312b98a92b00ff48e869e2769ce5ca6c7bc4ec793a429d450dc3c9bba2/pandera-0.26.1.tar.gz", hash = "sha256:81a55a6429770d31b3bf4c3e8e1096a38296bd3009f9eca5780fad3c3c17fd82", size = 560263, upload-time = "2025-08-26T17:06:30.907Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/79/9e/79bb285d4dbee32f4786b659bfbddb2d56edf3c9bc2b7ed16474903584ed/pandera-0.23.1-py3-none-any.whl", hash = "sha256:37f75cfb5e34db88afc07adf3ea07ba8738bca709f0e67799c8f1b2fc6b9c977", size = 264213, upload-time = "2025-03-08T02:25:27.672Z" },
+    { url = "https://files.pythonhosted.org/packages/db/3b/91622e08086a6be44d2c0f34947d94c5282b53d217003d3ba390ee2d174b/pandera-0.26.1-py3-none-any.whl", hash = "sha256:1ff5b70556ce2f85c6b27e8fbe835a1761972f4d05f6548b4686b0db26ecb73b", size = 292907, upload-time = "2025-08-26T17:06:29.193Z" },
 ]
 
 [[package]]
@@ -377,7 +376,7 @@ wheels = [
 
 [[package]]
 name = "politipo"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
@@ -428,8 +427,8 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.4.2" },
     { name = "pandas", marker = "extra == 'all'", specifier = ">=2.2.3" },
     { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.2.3" },
-    { name = "pandera", marker = "extra == 'all'", specifier = ">=0.23.1" },
-    { name = "pandera", marker = "extra == 'validation'", specifier = ">=0.23.1" },
+    { name = "pandera", marker = "extra == 'all'", specifier = ">=0.24.0" },
+    { name = "pandera", marker = "extra == 'validation'", specifier = ">=0.24.0" },
     { name = "polars", marker = "extra == 'all'", specifier = ">=1.35.2" },
     { name = "polars", marker = "extra == 'polars'", specifier = ">=1.35.2" },
     { name = "pyarrow", marker = "extra == 'all'", specifier = ">=22.0.0" },

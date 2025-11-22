@@ -12,7 +12,7 @@
 # ///
 
 """
-# Politipo (PolyType) 🧬 v3.0 Omega
+# Politipo (PolyType) 🧬 v0.3.1 Omega
 The Ultimate Data Fabric & Quality Engine.
 
 Integrates: Python -> Pydantic -> Arrow -> DuckDB/Polars -> Pandera (Validation) -> Kùzu
