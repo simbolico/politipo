@@ -36,6 +36,7 @@ import datetime
 import decimal
 import enum
 import functools
+import types
 import typing
 import uuid
 from dataclasses import dataclass
@@ -579,7 +580,7 @@ class PolyResolver:
         origin = get_origin(type_hint)
         args = get_args(type_hint)
 
-        if origin is Union and type(None) in args:
+        if origin in (Union, types.UnionType) and type(None) in args:
             is_nullable = True
             non_none = [t for t in args if t is not type(None)]
             if len(non_none) == 1:
@@ -689,13 +690,14 @@ class QualityGate:
         columns = {}
         # Select backend-specific Check module to avoid top-level pandera usage
         check_mod: Any
-        if backend == "polars" and PANDERA_AVAILABLE and pa_pl is not object():
+        if backend == "polars" and PANDERA_AVAILABLE and isinstance(pa_pl, types.ModuleType):
             check_mod = typing.cast(Any, pa_pl)
-        elif backend == "pandas" and PANDERA_AVAILABLE and pa_pd is not object():
+        elif backend == "pandas" and PANDERA_AVAILABLE and isinstance(pa_pd, types.ModuleType):
             check_mod = typing.cast(Any, pa_pd)
         else:
             # Fallback: retain compatibility if specific backend submodule unavailable
             check_mod = typing.cast(Any, pandera)
+
         for name, field in model.model_fields.items():
             checks = []
             # Extract Pydantic constraints (gt, lt, pattern, etc)
@@ -741,9 +743,9 @@ class QualityGate:
                 dtype, checks=checks, nullable=(not field.is_required()) or allows_none
             )
 
-        if backend == "polars" and POLARS_AVAILABLE and pa_pl is not object():
+        if backend == "polars" and POLARS_AVAILABLE and isinstance(pa_pl, types.ModuleType):
             return typing.cast(Any, pa_pl).DataFrameSchema(columns)
-        if backend == "pandas" and PANDERA_AVAILABLE and pa_pd is not object():
+        if backend == "pandas" and PANDERA_AVAILABLE and isinstance(pa_pd, types.ModuleType):
             return typing.cast(Any, pa_pd).DataFrameSchema(columns)
         # Fallback: top-level pandera
         return typing.cast(Any, pandera).DataFrameSchema(columns)
@@ -1110,7 +1112,7 @@ class Pipeline:
         if not ARROW_AVAILABLE:
             raise ImportError("PyArrow required")
         # Optimization: Reuse existing arrow table if available
-        tbl = self._arrow or self._transporter.to_arrow(self.objects)
+        tbl = self._arrow if self._arrow is not None else self._transporter.to_arrow(self.objects)
         return tbl.to_pandas()
 
     def write_parquet(self, path: str, compression: str = "snappy") -> None:

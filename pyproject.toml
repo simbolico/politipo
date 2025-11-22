@@ -67,7 +67,7 @@ extend-exclude = "(legacy|backups|\\.specstory)/"
 
 [tool.pytest.ini_options]
 testpaths = ["src"]
-addopts = "-ra --strict-markers --maxfail=1 --cov=src --cov-report=term-missing --cov-fail-under=95"
+addopts = "-ra --strict-markers --maxfail=1 --cov=src --cov-report=term-missing --cov-fail-under=97"
 filterwarnings = [
     "ignore:the physical Categorical ordering is deprecated:DeprecationWarning",
 ]
@@ -84,4 +84,5 @@ exclude_lines = [
     "if __name__ == \"__main__\":",
     # Exclude abstract method ellipsis definitions
     '^\\s*def\\s+\\w+\\(.*\\)\\s*->.*:\\s*\\.\\.\\.$',
+    "if TYPE_CHECKING:",
 ]

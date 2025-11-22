@@ -1107,6 +1107,292 @@ def test_kuzu_pk_guard():
     assert "PRIMARY KEY (id)" in ddl
 
 
+def test_pipeline_missing_arrow_raises():
+    # Simulate Arrow missing
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(pt, "ARROW_AVAILABLE", False)
+        p = pt.Pipeline(ComplexModel, [])
+
+        with pytest.raises(ImportError, match="PyArrow required"):
+            p.to_pandas()
+
+        with pytest.raises(ImportError, match="PyArrow required"):
+            p.write_parquet("dummy")
+
+
+def test_from_models_empty_raises():
+    with pytest.raises(ValueError, match="non-empty list"):
+        pt.from_models([])
+
+
+def test_resolve_vector_malformed_metadata():
+    # Annotated[list[float], "vector"] without dim
+    # Should fall back to ListSpec(FloatSpec)
+    spec = pt._RESOLVER.resolve(Annotated[list[float], "vector"])
+    assert isinstance(spec, pt.ListSpec)
+    assert isinstance(spec.child, pt.FloatSpec)
+    # Should NOT be VectorSpec because dim is missing
+    assert not isinstance(spec, pt.VectorSpec)
+
+
+def test_generate_ddl_sqlalchemy_exceptions(monkeypatch):
+    # Force SQL path but make dialect loading fail
+    monkeypatch.setattr(pt, "SQL_AVAILABLE", True)
+
+    # Mock sqlalchemy.dialects to raise Exception
+    class MockDialects:
+        def __getattr__(self, name):
+            raise Exception("Boom")
+
+    monkeypatch.setattr("sqlalchemy.dialects", MockDialects())
+
+    t = pt.PolyTransporter(ComplexModel)
+    # Should fallback gracefully to generic SQL/DuckDB types
+    ddl = t.generate_ddl("sql+postgres", "tbl")
+    assert "CREATE TABLE" in ddl
+
+
+def test_resolve_union_single_non_none():
+    # Union[int, None] -> IntegerSpec(nullable=True)
+    spec = pt._RESOLVER.resolve(int | None)
+    assert isinstance(spec, pt.IntegerSpec)
+    assert spec.nullable is True
+
+
+def test_resolve_type_hints_failure(monkeypatch):
+    # Mock typing.get_type_hints to fail only on first call (include_extras=True)
+    orig_get_type_hints = typing.get_type_hints
+
+    def boom(obj, globalns=None, localns=None, include_extras=False):
+        if include_extras:
+            raise TypeError("Boom")
+        return orig_get_type_hints(obj, globalns, localns, include_extras=False)
+
+    monkeypatch.setattr(typing, "get_type_hints", boom)
+
+    class BrokenModel(BaseModel):
+        pass
+
+    # Should fallback to empty fields dict
+    spec = pt._RESOLVER.resolve(BrokenModel)
+    assert isinstance(spec, pt.StructSpec)
+    assert spec.fields == {}
+
+
+def test_generate_ddl_sql_fallback():
+    # "sql+unknown" -> fallback to "sql"
+    t = pt.PolyTransporter(ComplexModel)
+    ddl = t.generate_ddl("sql+unknown", "tbl")
+    assert "CREATE TABLE" in ddl
+
+
+def test_generate_ddl_generic_sql():
+    # "sql" dialect
+    t = pt.PolyTransporter(ComplexModel)
+    ddl = t.generate_ddl("sql", "tbl")
+    assert "CREATE TABLE" in ddl
+
+
+def test_require_validation_missing():
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(pt, "PANDERA_AVAILABLE", False)
+        with pytest.raises(ImportError, match="pandera"):
+            pt.require("validation")
+
+
+def test_generate_schema_fallbacks():
+    # Test backend="unknown" -> fallback to pandera
+    schema = pt.QualityGate.generate_schema(ComplexModel, backend="unknown")
+    # Should return a DataFrameSchema (generic)
+    assert schema is not None
+
+    # Test backend="polars" but pa_pl missing
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(pt, "pa_pl", object())
+        schema = pt.QualityGate.generate_schema(ComplexModel, backend="polars")
+        assert schema is not None
+
+
+def test_resolve_field_info_no_metadata():
+    # FieldInfo with no metadata attribute or None
+    class MockFI:
+        metadata = None
+
+        def is_required(self):
+            return True
+
+    spec = pt._RESOLVER.resolve(int, MockFI())
+    assert isinstance(spec, pt.IntegerSpec)
+
+
+def test_pipeline_reuse_arrow():
+    # Verify that to_pandas reuses the cached arrow table
+    p = pt.Pipeline(ComplexModel, [])
+    # First call creates arrow table
+    with pytest.MonkeyPatch().context() as mp:
+        # Mock to_arrow to count calls
+        orig_to_arrow = p._transporter.to_arrow
+        call_count = 0
+
+        def mock_to_arrow(objects):
+            nonlocal call_count
+            call_count += 1
+            return orig_to_arrow(objects)
+
+        mp.setattr(p._transporter, "to_arrow", mock_to_arrow)
+
+        # First call
+        p.to_arrow()
+        assert call_count == 1
+
+        # Second call via to_pandas should reuse
+        p.to_pandas()
+        assert call_count == 1  # Should NOT increase
+
+
+def test_generate_schema_allows_none_exception():
+    # Create a model with a field annotation that causes get_origin to fail?
+    # Or just mock get_origin to raise Exception
+
+    class WeirdModel(BaseModel):
+        x: int
+
+    with pytest.MonkeyPatch().context() as mp:
+
+        def boom(obj):
+            raise TypeError("Boom")
+
+        mp.setattr(typing, "get_origin", boom)
+        # Should not crash, just treat as allows_none=False
+        schema = pt.QualityGate.generate_schema(WeirdModel)
+        assert schema is not None
+
+
+def test_generate_ddl_postgres():
+    # Test valid sqlalchemy dialect
+    if not pt.SQL_AVAILABLE:
+        pytest.skip("SQLAlchemy not available")
+
+    t = pt.PolyTransporter(ComplexModel)
+    ddl = t.generate_ddl(dialect="sql+postgresql", table_name="test_table")
+    assert "CREATE TABLE" in ddl
+    assert "id UUID" in ddl  # Postgres uses UUID type
+
+
+def test_generate_ddl_no_sql_available():
+    # Simulate SQL_AVAILABLE=False
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(pt, "SQL_AVAILABLE", False)
+        t = pt.PolyTransporter(ComplexModel)
+        # Should fallback to generic SQL (dialect="sql")
+        ddl = t.generate_ddl(dialect="sql+postgres", table_name="test")
+        assert "CREATE TABLE" in ddl
+        assert "tags JSON" in ddl  # Fallback to JSON for arrays when SQL unavailable
+
+
+def test_generate_ddl_compile_failure():
+    # Mock a TypeSpec with a broken sql object
+    class BrokenSpec(pt.TypeSpec):
+        sql = "BROKEN"
+        duckdb = "FALLBACK"
+
+    # But wait, "BROKEN" is a string, so it returns it.
+    # We need an object with .compile that raises.
+    class BrokenType:
+        def compile(self, dialect):
+            raise ValueError("Compile failed")
+
+    class BrokenSpec2(pt.TypeSpec):
+        sql = BrokenType()
+        duckdb = "FALLBACK"
+
+        @property
+        def arrow(self):
+            return None
+
+        @property
+        def kuzu(self):
+            return "BROKEN"
+
+    # Need a model using this spec
+    class LocalModel(BaseModel):
+        x: int
+
+    t = pt.PolyTransporter(LocalModel)
+    # Replace spec fields
+    t.spec.fields["broken"] = BrokenSpec2()
+
+    # Trigger DDL generation with a dialect that uses compile (e.g. postgres)
+    if not pt.SQL_AVAILABLE:
+        return
+
+    ddl = t.generate_ddl(dialect="sql+postgresql", table_name="test")
+    assert "FALLBACK" in ddl
+
+
+def test_kuzu_pk_fallback():
+    # Test Kuzu PK fallback to "id" field
+    class IdModel(BaseModel):
+        id: int
+        name: str
+
+    t = pt.PolyTransporter(IdModel)
+    ddl = t.generate_ddl(dialect="kuzu", table_name="test")
+    assert "PRIMARY KEY (id)" in ddl
+
+
+def test_struct_spec_sql_fallback():
+    # Test StructSpec.sql when SQL_AVAILABLE=False
+    class Nested(BaseModel):
+        x: int
+
+    spec = pt._RESOLVER.resolve(Nested)
+
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(pt, "SQL_AVAILABLE", False)
+        assert spec.sql == "JSON"
+
+
+def test_to_polars_validation_exception():
+    # Test to_polars swallows validation exception
+    if not pt.POLARS_AVAILABLE:
+        pytest.skip("Polars not available")
+
+    p = pt.Pipeline(ComplexModel, [])
+
+    with pytest.MonkeyPatch().context() as mp:
+
+        class MockSchema:
+            def validate(self, df):
+                raise ValueError("Validation failed")
+
+        def mock_gen_schema(model, backend="polars"):
+            if backend == "polars":
+                return MockSchema()
+
+            # For pandas, return a real schema or a passing mock
+            # Real schema might be complex to mock if we don't have real data matching it?
+            # Let's return a passing mock for pandas
+            class PassingSchema:
+                def validate(self, df):
+                    return df
+
+            return PassingSchema()
+
+        mp.setattr(pt.QualityGate, "generate_schema", mock_gen_schema)
+
+        # Should not crash (fallback to pandas validation which passes)
+        df = p.to_polars()
+        assert df is not None
+
+
+def test_require_validation_success():
+    # Test require("validation") when available
+    if not pt.PANDERA_AVAILABLE:
+        pytest.skip("Pandera not available")
+    pt.require("validation")
+
+
 if __name__ == "__main__":
 
     sys.exit(pytest.main(["-v", __file__]))
