@@ -46,7 +46,7 @@ class UserType(enum.Enum):
 class Event(BaseModel):
     id: Annotated[uuid.UUID, pt.FieldInfo(primary_key=True)]  # PK
     cost: Annotated[decimal.Decimal, pt.Precision(18, 4), Field(gt=0)]  # constraints
-    embedding: pt.Vector[4] | None  # vector type
+    embedding: Annotated[list[float], "vector", 4] | None  # vector type
     user_type: UserType  # enum
     timestamp: datetime.datetime
 
@@ -84,7 +84,7 @@ Why SotA
 API Overview
 
 - Precision: `Annotated[Decimal, pt.Precision(p, s)]` → Arrow decimal128, DuckDB DECIMAL(p,s)
-- Vector[N]: `pt.Vector[N]` → Arrow FixedSizeList(float32, N); DuckDB FLOAT[N]
+- Vector[N]: `Annotated[list[float], "vector", N]` (sugar: `pt.Vector[N]`) → Arrow FixedSizeList(float32, N); DuckDB FLOAT[N]
 - Resolver → Specs: Maps model fields to TypeSpecs (String/Int/Float/Bool/UUID/Decimal/List/Struct/Enum)
 - PolyTransporter:
   - `to_arrow(models)` → `pyarrow.Table`
@@ -100,7 +100,7 @@ API Overview
 Recipes
 
 - Financial decimals: `Precision(38, 18)` for high-precision columns; DuckDB DECIMAL(38,18).
-- Embeddings: `Vector[1536]` stored as FixedSizeList(float32, 1536); Arrow-friendly for RAG.
+- Embeddings: `Annotated[list[float], "vector", 1536]` (or `pt.Vector[1536]`) stored as FixedSizeList(float32, 1536); Arrow-friendly for RAG.
 - Enums as dictionary: memory-efficient encoded storage via Arrow dictionary type.
 - Kùzu DDL: `generate_ddl('kuzu', 'Node')` produces STRUCT-based Node table schema with PK.
 
@@ -112,6 +112,11 @@ If a dependency is missing, you’ll see a helpful error:
 Missing optional dependency 'pyarrow'.
 Install with: uv pip install '.[arrow]'
 ```
+
+Zero-Warning Type Checks
+
+- Enforced via `ty` across library and tests. Dynamic/optional deps use precise runtime checks and local casts, so there are no type warnings.
+- Run locally: `make type` (CI fails on any type errors).
 
 Benchmarks (excerpt)
 
@@ -137,7 +142,7 @@ Onboarding: Step-by-Step
 
 Development (uv-only)
 
-- Lint/format/type: `make lint`, `make fmt-check`, `make type`
+- Lint/format/type: `make lint`, `make fmt-check`, `make type` (zero warnings)
 - Tests: `make test` (src/), coverage: `make cov`
 - Pre-commit: `make pre-commit`
 
@@ -147,6 +152,7 @@ Releases
 - Build with uv: `make build`
 - Publish with uv (requires `UV_PUBLISH_TOKEN`): `make publish`
 - Release flow: `make release` then push tags: `git push --follow-tags` (publishing can be automated in CI)
+  - Current release: v0.3.0 — zero-warning type checks, stronger dynamic imports, updated docs
 user_sqlmodel = converter.convert({"id": 1, "name": "Alice"})
 ```
 
