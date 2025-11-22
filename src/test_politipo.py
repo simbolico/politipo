@@ -989,5 +989,46 @@ def test_resolve_field_info_is_required_type_error():
     assert isinstance(spec, pt.IntegerSpec)
 
 
+# --- DataType Registry & Factories ---
+
+
+def test_datatype_primitives():
+    assert pt.DataType.STRING is str
+    assert pt.DataType.INTEGER is int
+    assert pt.DataType.JSON is dict
+
+
+def test_datatype_factories():
+    # Test DECIMAL factory
+    DecType = pt.DataType.DECIMAL(20, 4)
+    spec = pt._RESOLVER.resolve(DecType)
+    assert isinstance(spec, pt.DecimalSpec)
+    assert spec.p == 20
+    assert spec.s == 4
+
+    # Test VECTOR factory
+    VecType = pt.DataType.VECTOR(128)
+    spec = pt._RESOLVER.resolve(VecType)
+    assert isinstance(spec, pt.VectorSpec)
+    assert spec.dim == 128
+
+
+def test_datatype_dynamic_registration():
+    class MyCustomType:
+        pass
+
+    # Register it
+    pt.DataType.register("CUSTOM", MyCustomType)
+
+    # Verify accessibility
+    assert hasattr(pt.DataType, "CUSTOM")
+    assert pt.DataType.CUSTOM is MyCustomType
+
+
+def test_datatype_registration_conflict():
+    with pytest.raises(ValueError, match="already registered"):
+        pt.DataType.register("STRING", int)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-v", __file__]))

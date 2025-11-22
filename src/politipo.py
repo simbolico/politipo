@@ -103,17 +103,21 @@ except ImportError:
 
 pandera: Any = None
 pa_pl: Any = None
+pa_pd: Any = None
 try:
     import pandera as _pandera
+    import pandera.pandas as _pa_pd
     import pandera.polars as _pa_pl
 
     PANDERA_AVAILABLE: bool = True
     pandera = _pandera
     pa_pl = _pa_pl
+    pa_pd = _pa_pd
 except ImportError:
     PANDERA_AVAILABLE = False
     pandera = object()
     pa_pl = object()
+    pa_pd = object()
 
 # Public type aliases (runtime-visible; string-annotated to avoid runtime imports)
 type ArrowTable = "pa.Table"
@@ -150,6 +154,63 @@ class VectorMarker:
 
 # Help static type checkers accept Vector[4] notation by treating as Any
 Vector: Any = VectorMarker
+
+
+# --- Universal Type Registry & Factory ---
+class DataType:
+    """
+    Universal Type Registry & Factory.
+    Acts as the single source of truth for data types across the ecosystem.
+    Allows external libraries to register custom semantic types.
+    """
+
+    # --- Primitives (Direct Mapping) ---
+    STRING = str
+    INTEGER = int
+    FLOAT = float
+    BOOLEAN = bool
+    BYTES = bytes
+    DATE = datetime.date
+    TIMESTAMP = datetime.datetime
+    JSON = dict
+    UUID = uuid.UUID
+
+    # --- Complex Types (Factories) ---
+
+    @staticmethod
+    def DECIMAL(precision: int = 18, scale: int = 2) -> Any:
+        """
+        Returns a Decimal type annotated with Precision metadata.
+        Usage: field: DataType.DECIMAL(10, 2)
+        """
+        return Annotated[decimal.Decimal, Precision(precision, scale)]
+
+    @staticmethod
+    def VECTOR(dim: int) -> Any:
+        """
+        Returns a List[float] annotated with Vector metadata.
+        Usage: embedding: DataType.VECTOR(1536)
+        """
+        return Vector[dim]
+
+    # --- Extensibility Mechanism ---
+
+    @classmethod
+    def register(cls, name: str, type_def: Any) -> None:
+        """
+        Registers a new type dynamically.
+        Used by upper layers (Kernel/Registry) to inject types like RID, GeoPoint, etc.
+
+        Args:
+            name: The name of the attribute (e.g., 'RID'). Must be uppercase.
+            type_def: The python type or Annotated type definition.
+        """
+        name = name.upper()
+        if hasattr(cls, name):
+            raise ValueError(f"DataType '{name}' is already registered.")
+
+        setattr(cls, name, type_def)
+
 
 # --- 1. The Atomic Spec System (The DNA) ---
 
@@ -600,26 +661,34 @@ class QualityGate:
             )
 
         columns = {}
+        # Select backend-specific Check module to avoid top-level pandera usage
+        check_mod: Any
+        if backend == "polars" and PANDERA_AVAILABLE and pa_pl is not object():
+            check_mod = typing.cast(Any, pa_pl)
+        elif backend == "pandas" and PANDERA_AVAILABLE and pa_pd is not object():
+            check_mod = typing.cast(Any, pa_pd)
+        else:
+            # Fallback: retain compatibility if specific backend submodule unavailable
+            check_mod = typing.cast(Any, pandera)
         for name, field in model.model_fields.items():
             checks = []
             # Extract Pydantic constraints (gt, lt, pattern, etc)
             constraints = QualityGate._extract_constraints(field)
 
-            pnd = typing.cast(Any, pandera)
             if "gt" in constraints:
-                checks.append(pnd.Check.gt(constraints["gt"]))
+                checks.append(check_mod.Check.gt(constraints["gt"]))
             if "ge" in constraints:
-                checks.append(pnd.Check.ge(constraints["ge"]))
+                checks.append(check_mod.Check.ge(constraints["ge"]))
             if "lt" in constraints:
-                checks.append(pnd.Check.lt(constraints["lt"]))
+                checks.append(check_mod.Check.lt(constraints["lt"]))
             if "le" in constraints:
-                checks.append(pnd.Check.le(constraints["le"]))
+                checks.append(check_mod.Check.le(constraints["le"]))
             if "pattern" in constraints:
-                checks.append(pnd.Check.str_matches(constraints["pattern"]))
+                checks.append(check_mod.Check.str_matches(constraints["pattern"]))
             # String length constraints
             if "min_length" in constraints or "max_length" in constraints:
                 checks.append(
-                    pnd.Check.str_length(
+                    check_mod.Check.str_length(
                         min_value=constraints.get("min_length"),
                         max_value=constraints.get("max_length"),
                     )
@@ -627,7 +696,7 @@ class QualityGate:
             # multiple_of for numeric
             if "multiple_of" in constraints:
                 n = constraints["multiple_of"]
-                checks.append(pnd.Check(lambda s, n=n: (s % n == 0)))
+                checks.append(check_mod.Check(lambda s, n=n: (s % n == 0)))
 
             # Map Type roughly for Pandera
             # Note: Pandera Polars backend infers type mostly from
@@ -642,12 +711,15 @@ class QualityGate:
             except Exception:
                 allows_none = False
 
-            columns[name] = pnd.Column(
+            columns[name] = check_mod.Column(
                 dtype, checks=checks, nullable=(not field.is_required()) or allows_none
             )
 
-        if backend == "polars" and POLARS_AVAILABLE:
+        if backend == "polars" and POLARS_AVAILABLE and pa_pl is not object():
             return typing.cast(Any, pa_pl).DataFrameSchema(columns)
+        if backend == "pandas" and PANDERA_AVAILABLE and pa_pd is not object():
+            return typing.cast(Any, pa_pd).DataFrameSchema(columns)
+        # Fallback: top-level pandera
         return typing.cast(Any, pandera).DataFrameSchema(columns)
 
     @staticmethod
@@ -952,7 +1024,7 @@ _EXTRA_HINT = {
 
 
 def require(
-    extra: Literal["arrow", "polars", "duckdb", "validation", "pandas", "sqlalchemy"]
+    extra: Literal["arrow", "polars", "duckdb", "validation", "pandas", "sqlalchemy"],
 ) -> None:
     """Ensure an optional extra is available or raise a helpful ImportError.
 
