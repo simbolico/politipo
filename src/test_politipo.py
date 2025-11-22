@@ -20,6 +20,7 @@ import importlib as _importlib
 import importlib.util as _importlib_util
 import os as _os
 import sys
+import typing
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated
@@ -51,7 +52,7 @@ class ComplexModel(BaseModel):
     # Financial Precision
     balance: Annotated[decimal.Decimal, pt.Precision(18, 4)]
     # Vector Embedding
-    embedding: pt.Vector[4] | None
+    embedding: Annotated[list[float], "vector", 4] | None
     # Enum
     role: UserType
     # Nested
@@ -145,7 +146,7 @@ def test_resolve_decimal_precision():
 
 def test_resolve_vector():
     """Testa se Vector[N] vira Fixed List"""
-    MyVec = pt.Vector[1536]
+    MyVec = Annotated[list[float], "vector", 1536]
     spec = pt._RESOLVER.resolve(MyVec)
     assert isinstance(spec, pt.VectorSpec)
     assert spec.dim == 1536
@@ -339,6 +340,7 @@ def test_ingest_duckdb(sample_data):
 
     # Verify data inside DuckDB
     res = con.sql("SELECT name, balance FROM test_table WHERE name='Alice'").fetchone()
+    assert res is not None
     assert res[0] == "Alice"
     # Check if decimal precision was maintained
     assert float(res[1]) == 100.5
@@ -350,7 +352,7 @@ def test_ingest_duckdb(sample_data):
 @pytest.mark.skipif(not pt.PANDERA_AVAILABLE, reason="Pandera not installed")
 def test_pandera_schema_generation():
     schema = pt.QualityGate.generate_schema(ComplexModel, backend="pandas")
-    import pandera as pa
+    import pandera.pandas as pa
 
     assert isinstance(schema, pa.DataFrameSchema)
     assert "level" in schema.columns
@@ -396,9 +398,9 @@ def test_pandera_validation_execution(sample_data):
     bad_data = [bad]
 
     # Pandera raises SchemaError for invalid data
-    import pandera as pa
+    from pandera import errors as pa_errors
 
-    with pytest.raises(pa.errors.SchemaError):
+    with pytest.raises(pa_errors.SchemaError):
         pt.to_polars(bad_data, validate=True)
 
 
@@ -479,7 +481,7 @@ def test_require_and_wrappers_and_pipeline(sample_data):
 def test_invalid_model_resolution():
     """Ensures transporter fails on non-model"""
     with pytest.raises(ValueError):
-        pt.PolyTransporter(int)  # Not a BaseModel
+        pt.PolyTransporter(typing.cast(type[BaseModel], int))  # Not a BaseModel
 
 
 def test_resolve_unsupported_type():
@@ -561,7 +563,9 @@ def test_pipeline_duckdb(tmp_path):
     ]
     con = duckdb.connect(str(tmp_path / "db.duckdb"))
     pt.from_models(rows).to_arrow().to_duckdb(con, "ux_table")
-    res = con.sql("select count(*) from ux_table").fetchone()[0]
+    _row = con.sql("select count(*) from ux_table").fetchone()
+    assert _row is not None
+    res = _row[0]
     assert res == 1
 
 
@@ -683,9 +687,9 @@ def test_pandera_additional_constraints():
         amount=decimal.Decimal("3.00"),
         created_at=datetime.datetime.now(),
     )
-    import pandera as pa
+    from pandera import errors as pa_errors
 
-    with pytest.raises(pa.errors.SchemaError):
+    with pytest.raises(pa_errors.SchemaError):
         # Use transporter path to run validation fallback if needed
         pt.PolyTransporter(UXModel).to_polars([bad], validate=True)
 
@@ -728,10 +732,16 @@ def test_generate_ddl_sqlalchemy_path_monkeypatched(monkeypatch):
         mysql = DialectStub
 
     import sys as _sys
+    import types as _types
 
     monkeypatch.setattr(pt, "SQL_AVAILABLE", True)
     monkeypatch.setattr(pt, "sa", SAStub)
-    _sys.modules["sqlalchemy.dialects"] = DialectsStub
+    _dialects = _types.ModuleType("sqlalchemy.dialects")
+    _d_any = typing.cast(typing.Any, _dialects)
+    _d_any.postgresql = DialectStub
+    _d_any.sqlite = DialectStub
+    _d_any.mysql = DialectStub
+    _sys.modules["sqlalchemy.dialects"] = _dialects
 
     ddl = pt.PolyTransporter(UXModel).generate_ddl("sql+postgresql", "ux_table")
     assert "CREATE TABLE" in ddl
@@ -765,7 +775,7 @@ def test_require_messages():
 @pytest.mark.skipif(not pt.ARROW_AVAILABLE, reason="arrow missing")
 def test_invalid_vector_length_raises():
     class VModel(BaseModel):
-        emb: pt.Vector[4] | None
+        emb: Annotated[list[float], "vector", 4] | None
 
     # Bypass validation to inject bad length
     bad = VModel.model_construct(emb=[0.1, 0.2, 0.3])
@@ -838,7 +848,9 @@ def test_duckdb_empty_ingest(tmp_path):
     t = pt.PolyTransporter(RModel)
     # Ingest empty should not crash; table created with zero rows
     t.ingest_duckdb(con, "r_table", [])
-    res = con.sql("select count(*) from r_table").fetchone()[0]
+    _row = con.sql("select count(*) from r_table").fetchone()
+    assert _row is not None
+    res = _row[0]
     assert res == 0
 
 

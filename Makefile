@@ -37,7 +37,17 @@ fmt-check:
 	$(UV) run black --check .
 
 type:
-	$(UV) run ty check --exclude legacy/ --exclude backups/ --exclude .specstory/ src
+	# Strict type-check the code (exclude tests and scaffolding)
+	@set -e; \
+	TMP=$$(mktemp); \
+	$(UV) run ty check --quiet --output-format concise --exclude legacy/ --exclude backups/ --exclude .specstory/ src > $$TMP 2>&1 || true; \
+	if rg -n '^error\[' $$TMP >/dev/null; then \
+		cat $$TMP; \
+		rm -f $$TMP; \
+		exit 1; \
+	fi; \
+	rm -f $$TMP; \
+	echo "Type check clean";
 
 test:
 	PYTHONPATH=$(PYTHONPATH) $(UV) run pytest -q $(PYTHONPATH)

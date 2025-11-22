@@ -1,0 +1,7 @@
+# ty configuration
+
+[rules]
+# With improved annotations/guards, we can keep defaults (no global ignores)
+
+# You can toggle severity per rule if desired, e.g.:
+# error = ["invalid-assignment", "invalid-argument-type"]

@@ -40,30 +40,39 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
+from pydantic import BaseModel
+from pydantic.fields import FieldInfo
+
 # --- Ecosystem Imports (Safe Loading) ---
+sa: Any = None
 try:
-    import sqlalchemy as sa
+    import sqlalchemy as _sa
 
     SQL_AVAILABLE = True
+    sa = _sa
 except ImportError:
     SQL_AVAILABLE = False
-    sa = None
+    sa = object()
 
+pa: Any = None
 try:
-    import pyarrow as pa
+    import pyarrow as _pa
 
     ARROW_AVAILABLE = True
+    pa = _pa
 except ImportError:
     ARROW_AVAILABLE = False
-    pa = None
+    pa = object()
 
+pl: Any = None
 try:
-    import polars as pl
+    import polars as _pl
 
     POLARS_AVAILABLE = True
+    pl = _pl
 except ImportError:
     POLARS_AVAILABLE = False
-    pl = None
+    pl = object()
 
 try:
     import duckdb
@@ -72,16 +81,19 @@ try:
 except ImportError:
     DUCKDB_AVAILABLE = False
 
+pandera: Any = None
+pa_pl: Any = None
 try:
-    import pandera as pandera
-    import pandera.polars as pa_pl
+    import pandera as _pandera
+    import pandera.polars as _pa_pl
 
     PANDERA_AVAILABLE = True
+    pandera = _pandera
+    pa_pl = _pa_pl
 except ImportError:
     PANDERA_AVAILABLE = False
-
-from pydantic import BaseModel
-from pydantic.fields import FieldInfo
+    pandera = object()
+    pa_pl = object()
 
 # --- Metadata Markers ---
 
@@ -107,7 +119,8 @@ class VectorMarker:
         return Annotated[list[float], "vector", dim]
 
 
-Vector = VectorMarker
+# Help static type checkers accept Vector[4] notation by treating as Any
+Vector: Any = VectorMarker
 
 # --- 1. The Atomic Spec System (The DNA) ---
 
@@ -135,7 +148,8 @@ class TypeSpec(abc.ABC):
     def get_arrow_field(self, name: str) -> Any:
         if not ARROW_AVAILABLE:
             return None
-        return pa.field(name, self.arrow, nullable=self.nullable)
+        p = typing.cast(Any, pa)
+        return p.field(name, self.arrow, nullable=self.nullable)
 
     def serialize(self, value: Any) -> Any:
         """Prepares value for Arrow ingestion (Fast Path)."""
@@ -160,7 +174,8 @@ class StringSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.string() if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.string() if ARROW_AVAILABLE else None
 
 
 class IntegerSpec(TypeSpec):
@@ -178,7 +193,8 @@ class IntegerSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.int64() if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.int64() if ARROW_AVAILABLE else None
 
 
 class FloatSpec(TypeSpec):
@@ -196,7 +212,8 @@ class FloatSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.float64() if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.float64() if ARROW_AVAILABLE else None
 
 
 class BooleanSpec(TypeSpec):
@@ -214,7 +231,8 @@ class BooleanSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.bool_() if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.bool_() if ARROW_AVAILABLE else None
 
 
 class UUIDSpec(TypeSpec):
@@ -237,7 +255,8 @@ class UUIDSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.binary(16) if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.binary(16) if ARROW_AVAILABLE else None
 
     def serialize(self, value: Any) -> Any:
         if value is None:
@@ -266,7 +285,8 @@ class DecimalSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.decimal128(self.p, self.s) if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.decimal128(self.p, self.s) if ARROW_AVAILABLE else None
 
 
 class DateTimeSpec(TypeSpec):
@@ -284,7 +304,8 @@ class DateTimeSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.timestamp("us", tz="UTC") if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.timestamp("us", tz="UTC") if ARROW_AVAILABLE else None
 
 
 class ListSpec(TypeSpec):
@@ -306,7 +327,8 @@ class ListSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.list_(self.child.arrow) if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.list_(self.child.arrow) if ARROW_AVAILABLE else None
 
     def serialize(self, value: Any) -> Any:
         if value is None:
@@ -339,7 +361,8 @@ class VectorSpec(TypeSpec):
 
     @property
     def arrow(self):
-        return pa.list_(pa.float32(), self.dim) if ARROW_AVAILABLE else None
+        p = typing.cast(Any, pa)
+        return p.list_(p.float32(), self.dim) if ARROW_AVAILABLE else None
 
     def serialize(self, value: Any) -> Any:
         if value is None:
@@ -374,7 +397,8 @@ class StructSpec(TypeSpec):
     def arrow(self):
         if not ARROW_AVAILABLE:
             return None
-        return pa.struct([v.get_arrow_field(k) for k, v in self.fields.items()])
+        p = typing.cast(Any, pa)
+        return p.struct([v.get_arrow_field(k) for k, v in self.fields.items()])
 
     def serialize(self, value: Any) -> Any:
         if value is None:
@@ -407,7 +431,8 @@ class EnumSpec(TypeSpec):
         # SotA Memory: Use Dictionary Encoding
         if not ARROW_AVAILABLE:
             return None
-        return pa.dictionary(pa.int32(), self.inner.arrow)
+        p = typing.cast(Any, pa)
+        return p.dictionary(p.int32(), self.inner.arrow)
 
     def serialize(self, value: Any) -> Any:
         if value is None:
@@ -421,7 +446,7 @@ class EnumSpec(TypeSpec):
 class PolyResolver:
     """Maps Python/Pydantic types to TypeSpecs."""
 
-    def resolve(self, type_hint: Any, field_info: FieldInfo = None) -> TypeSpec:
+    def resolve(self, type_hint: Any, field_info: Any | None = None) -> Any:
         is_nullable = False
         is_pk = False
 
@@ -551,20 +576,21 @@ class QualityGate:
             # Extract Pydantic constraints (gt, lt, pattern, etc)
             constraints = QualityGate._extract_constraints(field)
 
+            pnd = typing.cast(Any, pandera)
             if "gt" in constraints:
-                checks.append(pandera.Check.gt(constraints["gt"]))
+                checks.append(pnd.Check.gt(constraints["gt"]))
             if "ge" in constraints:
-                checks.append(pandera.Check.ge(constraints["ge"]))
+                checks.append(pnd.Check.ge(constraints["ge"]))
             if "lt" in constraints:
-                checks.append(pandera.Check.lt(constraints["lt"]))
+                checks.append(pnd.Check.lt(constraints["lt"]))
             if "le" in constraints:
-                checks.append(pandera.Check.le(constraints["le"]))
+                checks.append(pnd.Check.le(constraints["le"]))
             if "pattern" in constraints:
-                checks.append(pandera.Check.str_matches(constraints["pattern"]))
+                checks.append(pnd.Check.str_matches(constraints["pattern"]))
             # String length constraints
             if "min_length" in constraints or "max_length" in constraints:
                 checks.append(
-                    pandera.Check.str_length(
+                    pnd.Check.str_length(
                         min_value=constraints.get("min_length"),
                         max_value=constraints.get("max_length"),
                     )
@@ -572,7 +598,7 @@ class QualityGate:
             # multiple_of for numeric
             if "multiple_of" in constraints:
                 n = constraints["multiple_of"]
-                checks.append(pandera.Check(lambda s, n=n: (s % n == 0)))
+                checks.append(pnd.Check(lambda s, n=n: (s % n == 0)))
 
             # Map Type roughly for Pandera
             # Note: Pandera Polars backend infers type mostly from
@@ -587,13 +613,13 @@ class QualityGate:
             except Exception:
                 allows_none = False
 
-            columns[name] = pandera.Column(
+            columns[name] = pnd.Column(
                 dtype, checks=checks, nullable=(not field.is_required()) or allows_none
             )
 
         if backend == "polars" and POLARS_AVAILABLE:
-            return pa_pl.DataFrameSchema(columns)
-        return pandera.DataFrameSchema(columns)
+            return typing.cast(Any, pa_pl).DataFrameSchema(columns)
+        return typing.cast(Any, pandera).DataFrameSchema(columns)
 
     @staticmethod
     def _extract_constraints(field) -> dict:
@@ -651,7 +677,8 @@ class PolyTransporter:
     def arrow_schema(self) -> Any:
         if not ARROW_AVAILABLE:
             return None
-        return pa.schema([v.get_arrow_field(k) for k, v in self.spec.fields.items()])
+        p = typing.cast(Any, pa)
+        return p.schema([v.get_arrow_field(k) for k, v in self.spec.fields.items()])
 
     def generate_ddl(self, dialect: Literal["duckdb", "kuzu", "sql"] | str, table_name: str) -> str:
         """Generates CREATE TABLE statements for infrastructure."""
@@ -673,13 +700,21 @@ class PolyTransporter:
             try:
                 import sqlalchemy.dialects as sad
 
+                # Resolve via getattr to appease type checkers
+                def _dialect(name: str):
+                    try:
+                        mod = getattr(sad, name)
+                        return mod.dialect()
+                    except Exception:
+                        return None
+
                 # Map common aliases to SQLAlchemy dialect classes
                 dialect_map = {
-                    "postgres": sad.postgresql.dialect(),
-                    "postgresql": sad.postgresql.dialect(),
-                    "sqlite": sad.sqlite.dialect(),
-                    "mysql": sad.mysql.dialect(),
-                    "mariadb": sad.mysql.dialect(),
+                    "postgres": _dialect("postgresql"),
+                    "postgresql": _dialect("postgresql"),
+                    "sqlite": _dialect("sqlite"),
+                    "mysql": _dialect("mysql"),
+                    "mariadb": _dialect("mysql"),
                 }
                 d = dialect_map.get(target)
             except Exception:
@@ -744,7 +779,8 @@ class PolyTransporter:
                 "Missing optional dependency 'pyarrow'.\nInstall with: uv pip install '.[arrow]'"
             )
         if not objects:
-            return pa.Table.from_pylist([], schema=self.arrow_schema)
+            p = typing.cast(Any, pa)
+            return p.Table.from_pylist([], schema=self.arrow_schema)
 
         # Optimization: Pre-resolve serialization functions
         # This avoids checking isinstance for every row
@@ -771,7 +807,8 @@ class PolyTransporter:
                 else:
                     v_list.append(val)
 
-        return pa.Table.from_pydict(pydict_data, schema=self.arrow_schema)
+        p = typing.cast(Any, pa)
+        return p.Table.from_pydict(pydict_data, schema=self.arrow_schema)
 
     def to_polars(self, objects: list[BaseModel], validate: bool = False) -> Any:
         """
@@ -784,13 +821,14 @@ class PolyTransporter:
             )
 
         arrow_table = self.to_arrow(objects)
-        df = pl.from_arrow(arrow_table)
+        p_pl = typing.cast(Any, pl)
+        df = p_pl.from_arrow(arrow_table)
 
         if validate and PANDERA_AVAILABLE:
             try:
                 schema = QualityGate.generate_schema(self.model_cls, backend="polars")
                 df = schema.validate(df)  # Vectorized validation
-                if isinstance(df, pl.LazyFrame):
+                if isinstance(df, typing.cast(Any, pl).LazyFrame):
                     df = df.collect()
             except Exception:
                 # Fallback to pandas backend if polars backend not available/compatible
@@ -804,7 +842,7 @@ class PolyTransporter:
                     if dtype_str == "category" or dtype_str.startswith("datetime64"):
                         df_pd[col] = df_pd[col].astype(object)
                 df_pd = schema_pd.validate(df_pd)
-                df = pl.from_pandas(df_pd)
+                df = typing.cast(Any, pl).from_pandas(df_pd)
 
         return df
 
@@ -927,7 +965,7 @@ if __name__ == "__main__":
         # Metadata: Constraints (for Pandera)
         cost: Annotated[decimal.Decimal, Precision(18, 4), FieldInfo(gt=0)]
         # Metadata: Vector (for Kuzu/Arrow)
-        embedding: Vector[4] | None
+        embedding: Annotated[list[float], "vector", 4] | None
         user_type: UserType
         timestamp: datetime.datetime
 

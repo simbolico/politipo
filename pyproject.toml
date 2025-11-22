@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "politipo"
-version = "0.2.0"
+version = "0.3.0"
 description = "PolyType: Pydantic → Arrow → DuckDB/Polars with vectorized validation (Pandera)."
 authors = [{ name = "Kevin Saltarelli", email = "kevinqz@gmail.com" }]
 requires-python = ">=3.13"
@@ -46,8 +46,7 @@ package-dir = {"" = "src"}
 py-modules = ["politipo"]
 
 [tool.uv]
-# No custom fields; reserved for future uv settings.
-publish = { allow-dirty = false }
+# Reserved for future uv settings (no custom fields for now)
 
 [tool.ruff]
 line-length = 100
