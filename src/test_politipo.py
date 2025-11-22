@@ -489,6 +489,7 @@ def test_datatype_register_mapping_preserves_flags():
     pt.DataType.register("RID2", RID, mapping=uuid.UUID)
 
     class M(BaseModel):
+        model_config = {"arbitrary_types_allowed": True}
         id: Annotated[RID, FieldInfo(primary_key=True)]
 
     spec = pt._RESOLVER.resolve(M)
