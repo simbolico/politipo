@@ -312,7 +312,9 @@ def test_to_arrow_conversion(sample_data):
 
     # Check Empty Data
     empty_tbl = pt.to_arrow([])
-    assert empty_tbl is None
+    assert empty_tbl is not None
+    assert isinstance(empty_tbl, pa.Table)
+    assert len(empty_tbl) == 0
 
 
 @pytest.mark.skipif(not pt.POLARS_AVAILABLE, reason="Polars not installed")
@@ -464,8 +466,9 @@ def test_require_and_wrappers_and_pipeline(sample_data):
         mp.setattr(pt, "POLARS_AVAILABLE", False)
         mp.setattr(pt, "DUCKDB_AVAILABLE", False)
         mp.setattr(pt, "PANDERA_AVAILABLE", False)
+        mp.setattr(pt, "PANDAS_AVAILABLE", False)
         mp.setattr(pt, "SQL_AVAILABLE", False)
-        for extra in ("arrow", "polars", "duckdb", "validation", "sqlalchemy"):
+        for extra in ("arrow", "polars", "duckdb", "validation", "pandas", "sqlalchemy"):
             with pytest.raises(ImportError):
                 pt.require(extra)
 
@@ -476,6 +479,22 @@ def test_require_and_wrappers_and_pipeline(sample_data):
         pt.from_models([])
     pipe = pt.pipeline(sample_data)
     assert isinstance(pipe, pt.Pipeline)
+
+
+def test_datatype_register_mapping_preserves_flags():
+    class RID(uuid.UUID):
+        pass
+
+    # Register custom type mapped to uuid.UUID
+    pt.DataType.register("RID2", RID, mapping=uuid.UUID)
+
+    class M(BaseModel):
+        id: Annotated[RID, FieldInfo(primary_key=True)]
+
+    spec = pt._RESOLVER.resolve(M)
+    assert "id" in spec.fields
+    assert spec.fields["id"].is_pk is True
+    assert isinstance(spec.fields["id"], pt.UUIDSpec)
 
 
 def test_invalid_model_resolution():

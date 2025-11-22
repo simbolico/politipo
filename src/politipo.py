@@ -29,6 +29,24 @@ Capabilities:
     - Automated Quality Gates via Pandera
 """
 
+# Arquitetura planejada para futura fissão em módulos:
+#
+# - typespec.py:
+#     TypeSpec e subclasses, DataType, Precision, VectorMarker.
+# - resolver.py:
+#     PolyResolver, _RESOLVER, resolve().
+# - quality.py:
+#     QualityGate.
+# - transport.py:
+#     PolyTransporter, generate_ddl, to_arrow, to_polars.
+# - pipeline.py:
+#     Pipeline, from_models, pipeline.
+# - extras.py:
+#     flags de disponibilidade (ARROW_AVAILABLE, etc.), require().
+#
+# O monofile atual é a "célula-mãe"; quando a base estabilizar,
+# esta será a divisão recomendada.
+
 from __future__ import annotations
 
 import abc
@@ -120,6 +138,17 @@ except ImportError:
     pandera = object()
     pa_pl = object()
     pa_pd = object()
+
+# Pandas (optional; aligned with other extras)
+pd: Any = None
+try:
+    import pandas as _pd
+
+    PANDAS_AVAILABLE: bool = True
+    pd = _pd
+except ImportError:
+    PANDAS_AVAILABLE = False
+    pd = object()
 
 # Public type aliases (runtime-visible; string-annotated to avoid runtime imports)
 type ArrowTable = "pa.Table"
@@ -215,7 +244,17 @@ class DataType:
         setattr(cls, name, type_def)
         # Hook into Resolver if mapping provided
         if mapping:
-            _RESOLVER.register_type(type_def, lambda n, p: _RESOLVER.resolve(mapping, None))
+            # Preserve nullability and primary key flags when mapping to a base type
+            def factory(nullable: bool, is_pk: bool) -> TypeSpec:
+                base_spec = _RESOLVER.resolve(mapping, None)
+                # Shallow clone the spec to avoid mutating cached instances
+                cloned = base_spec.__class__.__new__(base_spec.__class__)  # type: ignore[misc]
+                cloned.__dict__.update(base_spec.__dict__)
+                cloned.nullable = nullable
+                cloned.is_pk = is_pk
+                return typing.cast(TypeSpec, cloned)
+
+            _RESOLVER.register_type(type_def, factory)
 
 
 # --- 1. The Atomic Spec System (The DNA) ---
@@ -1022,7 +1061,10 @@ def generate_ddl(model: type[BaseModel], dialect: str, table_name: str) -> str:
 
 def to_arrow(objects: list[BaseModel]) -> pa.Table | None:
     if not objects:
-        return None
+        # Return an empty Arrow table for consistency with PolyTransporter
+        require("arrow")
+        p = typing.cast(Any, pa)
+        return p.Table.from_pylist([])
     return PolyTransporter(type(objects[0])).to_arrow(objects)
 
 
@@ -1083,8 +1125,46 @@ def require(
         raise ImportError(msg)
     if extra == "validation" and not PANDERA_AVAILABLE:
         raise ImportError(msg)
+    if extra == "pandas" and not PANDAS_AVAILABLE:
+        raise ImportError(msg)
     if extra == "sqlalchemy" and not SQL_AVAILABLE:
         raise ImportError(msg)
+
+
+# --- Public API surface ---
+__all__ = [
+    # Metadata & registry
+    "Precision",
+    "Vector",
+    "DataType",
+    # Specs
+    "TypeSpec",
+    "StringSpec",
+    "IntegerSpec",
+    "FloatSpec",
+    "BooleanSpec",
+    "UUIDSpec",
+    "DecimalSpec",
+    "DateTimeSpec",
+    "ListSpec",
+    "VectorSpec",
+    "StructSpec",
+    "EnumSpec",
+    # Resolver & quality
+    "resolve",
+    "QualityGate",
+    # Transport & pipeline
+    "PolyTransporter",
+    "generate_ddl",
+    "to_arrow",
+    "to_polars",
+    "from_models",
+    "pipeline",
+    # UX / DX
+    "inspect",
+    "require",
+    "Pipeline",
+]
 
 
 class Pipeline:
