@@ -1,6 +1,7 @@
 # politipo — PolyType Data Fabric
 
 [![CI](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinsaltarelli/politipo/actions/workflows/ci.yml)
+![PyPI](https://img.shields.io/pypi/v/politipo?label=pypi)
 ![Python](https://img.shields.io/badge/python-3.13%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Coverage](https://img.shields.io/badge/coverage-95%25%2B-brightgreen)
@@ -104,6 +105,25 @@ Recipes
 - Enums as dictionary: memory-efficient encoded storage via Arrow dictionary type
 - Kùzu DDL: `generate_ddl('kuzu', 'Node')` builds STRUCT-based Node schema with PK
 
+Design
+
+```mermaid
+flowchart LR
+  A[Pydantic v2 Model] --> B(PolyResolver)
+  B --> C{TypeSpec graph}
+  C -->|Arrow schema| D[PolyTransporter.to_arrow]
+  C -->|DDL| E[PolyTransporter.generate_ddl]
+  D --> F[Polars DataFrame]
+  D --> G[DuckDB via Arrow]
+  A --> H(QualityGate.generate_schema)
+  H --> F
+```
+
+- PolyResolver: Inspects model annotations (Annotated, FieldInfo) and builds TypeSpecs.
+- TypeSpecs: Encode cross-backend behavior (Arrow type, SQL type, Kùzu type, serialization).
+- PolyTransporter: High-throughput conversions to Arrow/Polars and ingestion to DuckDB.
+- QualityGate: Pandera schema from model metadata; vectorized validation with Polars or Pandas fallback.
+
 Missing-Extras UX
 
 If a dependency is missing, you’ll see a helpful error:
@@ -131,6 +151,7 @@ Releases
 - Publish with uv (requires `UV_PUBLISH_TOKEN`): `make publish`
 - Release flow: `make release` then push tags: `git push --follow-tags`
   - Current release: v0.3.0 — zero-warning type checks, stronger dynamic imports, updated docs
+- CI auto-publish: pushing a tag like `v0.3.0` triggers a Trusted Publishing workflow to PyPI.
 
 Contributing
 
