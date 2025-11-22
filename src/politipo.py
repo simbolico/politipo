@@ -38,9 +38,29 @@ import enum
 import typing
 import uuid
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Union, get_args, get_origin
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Literal,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel
+
+# --- Static type checking only (for IDE hints) ---
+if TYPE_CHECKING:  # Imported only for type checkers / IDEs
+    import duckdb as duckdb
+    import pandas as pd
+    import pandera as pandera
+
+    # Optional submodules for richer typing
+    import pandera.polars as pa_pl
+    import polars as pl
+    import pyarrow as pa
+    import sqlalchemy as sa
 from pydantic.fields import FieldInfo
 
 # --- Ecosystem Imports (Safe Loading) ---
@@ -48,7 +68,7 @@ sa: Any = None
 try:
     import sqlalchemy as _sa
 
-    SQL_AVAILABLE = True
+    SQL_AVAILABLE: bool = True
     sa = _sa
 except ImportError:
     SQL_AVAILABLE = False
@@ -58,7 +78,7 @@ pa: Any = None
 try:
     import pyarrow as _pa
 
-    ARROW_AVAILABLE = True
+    ARROW_AVAILABLE: bool = True
     pa = _pa
 except ImportError:
     ARROW_AVAILABLE = False
@@ -68,7 +88,7 @@ pl: Any = None
 try:
     import polars as _pl
 
-    POLARS_AVAILABLE = True
+    POLARS_AVAILABLE: bool = True
     pl = _pl
 except ImportError:
     POLARS_AVAILABLE = False
@@ -77,7 +97,7 @@ except ImportError:
 try:
     import duckdb
 
-    DUCKDB_AVAILABLE = True
+    DUCKDB_AVAILABLE: bool = True
 except ImportError:
     DUCKDB_AVAILABLE = False
 
@@ -87,13 +107,22 @@ try:
     import pandera as _pandera
     import pandera.polars as _pa_pl
 
-    PANDERA_AVAILABLE = True
+    PANDERA_AVAILABLE: bool = True
     pandera = _pandera
     pa_pl = _pa_pl
 except ImportError:
     PANDERA_AVAILABLE = False
     pandera = object()
     pa_pl = object()
+
+# Public type aliases (runtime-visible; string-annotated to avoid runtime imports)
+type ArrowTable = "pa.Table"
+type ArrowSchema = "pa.Schema"
+type ArrowField = "pa.Field"
+type ArrowDataType = "pa.DataType"
+type PolarsDF = "pl.DataFrame"
+type PandasDF = "pd.DataFrame"
+type DuckDBConn = "duckdb.DuckDBPyConnection"
 
 # --- Metadata Markers ---
 
@@ -134,7 +163,7 @@ class TypeSpec(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def sql(self) -> Any: ...
+    def sql(self) -> sa.types.TypeEngine | str: ...
     @property
     @abc.abstractmethod
     def kuzu(self) -> str: ...
@@ -143,9 +172,9 @@ class TypeSpec(abc.ABC):
     def duckdb(self) -> str: ...
     @property
     @abc.abstractmethod
-    def arrow(self) -> Any: ...
+    def arrow(self) -> pa.DataType | None: ...
 
-    def get_arrow_field(self, name: str) -> Any:
+    def get_arrow_field(self, name: str) -> pa.Field | None:
         if not ARROW_AVAILABLE:
             return None
         p = typing.cast(Any, pa)
@@ -446,7 +475,7 @@ class EnumSpec(TypeSpec):
 class PolyResolver:
     """Maps Python/Pydantic types to TypeSpecs."""
 
-    def resolve(self, type_hint: Any, field_info: Any | None = None) -> Any:
+    def resolve(self, type_hint: Any, field_info: Any | None = None) -> TypeSpec:
         is_nullable = False
         is_pk = False
 
@@ -674,7 +703,7 @@ class PolyTransporter:
             raise ValueError("Root must be a Struct/Model")
 
     @property
-    def arrow_schema(self) -> Any:
+    def arrow_schema(self) -> pa.Schema | None:
         if not ARROW_AVAILABLE:
             return None
         p = typing.cast(Any, pa)
@@ -769,7 +798,7 @@ class PolyTransporter:
 
         return ""
 
-    def to_arrow(self, objects: list[BaseModel]) -> Any:
+    def to_arrow(self, objects: list[BaseModel]) -> pa.Table:
         """
         SotA Batch Serialization: Objects -> Arrow Table.
         Handles UUID binary conversion and Enum integer encoding efficiently.
@@ -810,7 +839,7 @@ class PolyTransporter:
         p = typing.cast(Any, pa)
         return p.Table.from_pydict(pydict_data, schema=self.arrow_schema)
 
-    def to_polars(self, objects: list[BaseModel], validate: bool = False) -> Any:
+    def to_polars(self, objects: list[BaseModel], validate: bool = False) -> pl.DataFrame:
         """
         Zero-Copy conversion to Polars DataFrame.
         Optionally runs Pandera Quality Gate.
@@ -846,7 +875,9 @@ class PolyTransporter:
 
         return df
 
-    def ingest_duckdb(self, con: Any, table_name: str, objects: list[BaseModel]):
+    def ingest_duckdb(
+        self, con: duckdb.DuckDBPyConnection, table_name: str, objects: list[BaseModel]
+    ) -> int:
         """
         High-Speed Ingestion into DuckDB via Arrow Bridge.
         """
@@ -874,16 +905,38 @@ def generate_ddl(model: type[BaseModel], dialect: str, table_name: str) -> str:
     return PolyTransporter(model).generate_ddl(dialect, table_name)  # type: ignore
 
 
-def to_arrow(objects: list[BaseModel]) -> Any:
+def to_arrow(objects: list[BaseModel]) -> pa.Table | None:
     if not objects:
         return None
     return PolyTransporter(type(objects[0])).to_arrow(objects)
 
 
-def to_polars(objects: list[BaseModel], validate: bool = True) -> Any:
+def to_polars(objects: list[BaseModel], validate: bool = True) -> pl.DataFrame | None:
     if not objects:
         return None
     return PolyTransporter(type(objects[0])).to_polars(objects, validate=validate)
+
+
+# --- 5a. Developer Inspection Tool ---
+
+
+def inspect(model: type[BaseModel]) -> None:
+    """Prints the type mapping for a model (Debugging/Transparency)."""
+    spec = _RESOLVER.resolve(model)
+    if not hasattr(spec, "fields"):
+        print(f"Type: {type(spec).__name__} (Not a Model)")
+        return
+
+    print(f"🔍 Politipo Inspection: {model.__name__}")
+    print(f"{'Field':<15} | {'DuckDB':<20} | {'Arrow':<30}")
+    print("-" * 70)
+
+    for name, field in spec.fields.items():
+        arrow_name = str(field.arrow) if ARROW_AVAILABLE else "N/A"
+        if len(arrow_name) > 30:
+            arrow_name = arrow_name[:27] + "..."
+        print(f"{name:<15} | {field.duckdb:<20} | {arrow_name:<30}")
+    print("-" * 70)
 
 
 # --- 6a. UX Helpers (Extras Loader & Fluent Pipeline) ---
@@ -898,7 +951,9 @@ _EXTRA_HINT = {
 }
 
 
-def require(extra: str) -> None:
+def require(
+    extra: Literal["arrow", "polars", "duckdb", "validation", "pandas", "sqlalchemy"]
+) -> None:
     """Ensure an optional extra is available or raise a helpful ImportError.
 
     Usage: require("polars") will suggest: uv pip install '.[polars]'
@@ -921,21 +976,36 @@ class Pipeline:
     def __init__(self, model_cls: type[BaseModel], objects: list[BaseModel]):
         self.model_cls = model_cls
         self.objects = objects
-        self._arrow = None
-        self._df = None
+        self._arrow: pa.Table | None = None
+        self._df: pl.DataFrame | None = None
         self._transporter = PolyTransporter(model_cls)
 
     def to_arrow(self) -> Pipeline:
         self._arrow = self._transporter.to_arrow(self.objects)
         return self
 
-    def to_duckdb(self, con: Any, table_name: str) -> Pipeline:
+    def to_duckdb(self, con: duckdb.DuckDBPyConnection, table_name: str) -> Pipeline:
         self._transporter.ingest_duckdb(con, table_name, self.objects)
         return self
 
-    def to_polars(self, validate: bool = True) -> Any:
+    def to_polars(self, validate: bool = True) -> pl.DataFrame:
         self._df = self._transporter.to_polars(self.objects, validate=validate)
         return self._df
+
+    def to_pandas(self) -> pd.DataFrame | None:
+        """High-performance Arrow->Pandas conversion."""
+        if not ARROW_AVAILABLE:
+            raise ImportError("PyArrow required")
+        return self._transporter.to_arrow(self.objects).to_pandas()
+
+    def write_parquet(self, path: str, compression: str = "snappy") -> None:
+        """Dump memory directly to Parquet file."""
+        if not ARROW_AVAILABLE:
+            raise ImportError("PyArrow required")
+        import pyarrow.parquet as pq
+
+        tbl = self._transporter.to_arrow(self.objects)
+        pq.write_table(tbl, path, compression=compression)
 
 
 def from_models(objects: list[BaseModel]) -> Pipeline:

@@ -894,5 +894,25 @@ def test_polars_fallback_patch(monkeypatch):
     monkeypatch.setattr(pa_pl.DataFrameSchema, "validate", orig)
 
 
+# --- 8. New UX/DX Features Tests ---
+
+
+def test_inspect_no_crash(capsys):
+    # Ensure inspect prints a readable table and does not raise
+    pt.inspect(ComplexModel)
+    out, _ = capsys.readouterr()
+    assert "Politipo Inspection" in out
+    assert "Field" in out and "DuckDB" in out
+
+
+@pytest.mark.skipif(not pt.ARROW_AVAILABLE, reason="arrow missing")
+def test_pipeline_write_parquet(tmp_path, sample_data):
+    # Ensure write_parquet creates a file on disk
+    path = tmp_path / "sample.parquet"
+    pipe = pt.from_models(sample_data).to_arrow()
+    pipe.write_parquet(str(path))
+    assert path.exists() and path.stat().st_size > 0
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-v", __file__]))
