@@ -629,8 +629,11 @@ def test_import_without_extras_covers(monkeypatch):
 
 
 def test_generate_ddl_compile_type_branches(monkeypatch):
+    class LocalModel(BaseModel):
+        id: int
+
     # Build a transporter and inject custom specs to exercise compile_type branches
-    t = pt.PolyTransporter(ComplexModel)
+    t = pt.PolyTransporter(LocalModel)
 
     class DummySpec(pt.TypeSpec):
         @property
@@ -1030,5 +1033,80 @@ def test_datatype_registration_conflict():
         pt.DataType.register("STRING", int)
 
 
+# --- v0.4.0 Refactoring Verification ---
+
+
+def test_robust_vector_detection():
+    # Test list[float] (GenericAlias)
+    vec_type = typing.Annotated[list[float], "vector", 128]
+    spec = pt._RESOLVER.resolve(vec_type)
+    assert isinstance(spec, pt.VectorSpec)
+    assert spec.dim == 128
+
+    # Test typing.List[float]
+    vec_type_typing = typing.Annotated[list[float], "vector", 64]
+    spec = pt._RESOLVER.resolve(vec_type_typing)
+    assert isinstance(spec, pt.VectorSpec)
+    assert spec.dim == 64
+
+    # Test plain list (legacy support)
+    vec_type_plain = typing.Annotated[list, "vector", 32]
+    spec = pt._RESOLVER.resolve(vec_type_plain)
+    assert isinstance(spec, pt.VectorSpec)
+    assert spec.dim == 32
+
+
+def test_custom_type_registration_hook():
+    class RID(uuid.UUID):
+        pass
+
+    # Register RID to resolve to UUIDSpec
+    pt.DataType.register("RID", RID, mapping=uuid.UUID)
+
+    # Verify resolution
+    spec = pt._RESOLVER.resolve(RID)
+    assert isinstance(spec, pt.UUIDSpec)
+
+
+def test_resolver_caching():
+    # Verify cache info
+    assert hasattr(pt._RESOLVER.resolve, "cache_info")
+
+    # Clear cache
+    pt._RESOLVER.resolve.cache_clear()
+
+    # First call
+    pt._RESOLVER.resolve(int)
+    info1 = pt._RESOLVER.resolve.cache_info()
+    assert info1.misses >= 1
+
+    # Second call
+    pt._RESOLVER.resolve(int)
+    info2 = pt._RESOLVER.resolve.cache_info()
+    assert info2.hits >= 1
+
+
+def test_kuzu_pk_guard():
+    class NoPKModel(BaseModel):
+        name: str
+        age: int
+
+    t = pt.PolyTransporter(NoPKModel)
+
+    # Should raise ValueError because no PK and no id/pk field
+    with pytest.raises(ValueError, match="No primary key field defined"):
+        t.generate_ddl("kuzu", "nodes")
+
+    # Should work if we add id
+    class WithIDModel(BaseModel):
+        id: int
+        name: str
+
+    t2 = pt.PolyTransporter(WithIDModel)
+    ddl = t2.generate_ddl("kuzu", "nodes")
+    assert "PRIMARY KEY (id)" in ddl
+
+
 if __name__ == "__main__":
+
     sys.exit(pytest.main(["-v", __file__]))

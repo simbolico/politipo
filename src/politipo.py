@@ -35,6 +35,7 @@ import abc
 import datetime
 import decimal
 import enum
+import functools
 import typing
 import uuid
 from dataclasses import dataclass
@@ -196,7 +197,7 @@ class DataType:
     # --- Extensibility Mechanism ---
 
     @classmethod
-    def register(cls, name: str, type_def: Any) -> None:
+    def register(cls, name: str, type_def: Any, mapping: Any = None) -> None:
         """
         Registers a new type dynamically.
         Used by upper layers (Kernel/Registry) to inject types like RID, GeoPoint, etc.
@@ -204,12 +205,16 @@ class DataType:
         Args:
             name: The name of the attribute (e.g., 'RID'). Must be uppercase.
             type_def: The python type or Annotated type definition.
+            mapping: Optional type to resolve to (e.g. uuid.UUID for RID).
         """
         name = name.upper()
         if hasattr(cls, name):
             raise ValueError(f"DataType '{name}' is already registered.")
 
         setattr(cls, name, type_def)
+        # Hook into Resolver if mapping provided
+        if mapping:
+            _RESOLVER.register_type(type_def, lambda n, p: _RESOLVER.resolve(mapping, None))
 
 
 # --- 1. The Atomic Spec System (The DNA) ---
@@ -536,6 +541,16 @@ class EnumSpec(TypeSpec):
 class PolyResolver:
     """Maps Python/Pydantic types to TypeSpecs."""
 
+    def __init__(self) -> None:
+        self._custom_registry: dict[Any, typing.Callable[[bool, bool], TypeSpec]] = {}
+
+    def register_type(
+        self, type_hint: Any, factory: typing.Callable[[bool, bool], TypeSpec]
+    ) -> None:
+        """Register a custom type factory."""
+        self._custom_registry[type_hint] = factory
+
+    @functools.lru_cache(maxsize=1024)  # noqa: B019
     def resolve(self, type_hint: Any, field_info: Any | None = None) -> TypeSpec:
         is_nullable = False
         is_pk = False
@@ -556,7 +571,11 @@ class PolyResolver:
             except TypeError:
                 pass
 
-        # 2. Unwrap Annotated/Optional
+        # 0. Custom Types Hook
+        if type_hint in self._custom_registry:
+            return self._custom_registry[type_hint](is_nullable, is_pk)
+
+        # 1. Handle Annotated (Metadata)
         origin = get_origin(type_hint)
         args = get_args(type_hint)
 
@@ -581,11 +600,18 @@ class PolyResolver:
                             is_nullable = True
                     except TypeError:
                         pass
-            # Vector Handler
-            if base is list or base == list[float]:
-                for m in meta:
-                    if m == "vector" and len(meta) >= 2:
-                        return VectorSpec(dim=meta[1], nullable=is_nullable, is_pk=is_pk)
+            # Special Case: Vector (Annotated[list[float], "vector", dim])
+            # Robust check using get_origin/get_args
+            origin = get_origin(base)
+            args = get_args(base)
+            is_list_float = origin is list and (not args or args == (float,))
+
+            if is_list_float or base is list:
+                for i, m in enumerate(meta):
+                    if m == "vector" and len(meta) > i + 1:
+                        dim = meta[i + 1]
+                        if isinstance(dim, int):
+                            return VectorSpec(dim=dim, nullable=is_nullable, is_pk=is_pk)
             # Decimal Precision
             if base is decimal.Decimal:
                 for m in meta:
@@ -855,7 +881,22 @@ class PolyTransporter:
             return f"CREATE TABLE IF NOT EXISTS {safe_table} ({cols});"
 
         elif dialect == "kuzu":
-            pk_col = next((k for k, v in self.spec.fields.items() if v.is_pk), "id")
+            pk_col = None
+            # 1. Explicit PK
+            for name, field in self.spec.fields.items():
+                if field.is_pk:
+                    pk_col = name
+                    break
+            # 2. Heuristic fallback (id or pk)
+            if not pk_col:
+                for name in ("id", "pk"):
+                    if name in self.spec.fields:
+                        pk_col = name
+                        break
+
+            if not pk_col:
+                raise ValueError("No primary key field defined for Kùzu node table")
+
             cols = ", ".join(f"{k} {v.kuzu}" for k, v in self.spec.fields.items())
             return f"CREATE NODE TABLE {safe_table} ({cols}, PRIMARY KEY ({pk_col}));"
 
@@ -1068,7 +1109,9 @@ class Pipeline:
         """High-performance Arrow->Pandas conversion."""
         if not ARROW_AVAILABLE:
             raise ImportError("PyArrow required")
-        return self._transporter.to_arrow(self.objects).to_pandas()
+        # Optimization: Reuse existing arrow table if available
+        tbl = self._arrow or self._transporter.to_arrow(self.objects)
+        return tbl.to_pandas()
 
     def write_parquet(self, path: str, compression: str = "snappy") -> None:
         """Dump memory directly to Parquet file."""
