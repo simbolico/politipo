@@ -501,51 +501,123 @@ class VectorSpec(TypeSpec):
     """
     SotA AI Support.
     Maps Python List[float] to FixedSizeList (Arrow) and FIXED_LIST (Kuzu/DuckDB).
+    Enhanced to support different element types (float32, int32, etc.).
     """
 
-    def __init__(self, dim: int, **kwargs):
+    def __init__(self, dim: int, element_type: str = "float32", **kwargs):
         super().__init__(**kwargs)
         self.dim = dim
+        self.element_type = element_type
 
     @property
     def sql(self):
-        return sa.ARRAY(sa.Float) if SQL_AVAILABLE else "FLOAT[]"
+        if not SQL_AVAILABLE:
+            return f"{self.element_type.upper()}[]"
+
+        # Map element types to SQLAlchemy types
+        type_map = {
+            "float32": sa.Float,
+            "float64": sa.Float,
+            "int8": sa.SmallInteger,
+            "int16": sa.SmallInteger,
+            "int32": sa.Integer,
+            "int64": sa.BigInteger,
+        }
+        element_sql = type_map.get(self.element_type, sa.Float)
+        return sa.ARRAY(element_sql)
 
     def to_sqlalchemy_type(self, dialect_name: str):
         """
         Returns dialect-appropriate SQLAlchemy type for vectors.
-        PostgreSQL: ARRAY of FLOAT
+        PostgreSQL: ARRAY of element type
         SQLite/MySQL: JSON (no native array support)
         """
         if not SQL_AVAILABLE:
-            return "FLOAT[]"
+            return f"{self.element_type.upper()}[]"
 
         if "postgres" in dialect_name:
-            return sa.ARRAY(sa.Float)
+            # Map element types to SQLAlchemy types for PostgreSQL
+            type_map = {
+                "float32": sa.Float,
+                "float64": sa.Float,
+                "int8": sa.SmallInteger,
+                "int16": sa.SmallInteger,
+                "int32": sa.Integer,
+                "int64": sa.BigInteger,
+            }
+            element_sql = type_map.get(self.element_type, sa.Float)
+            return sa.ARRAY(element_sql)
 
         # SQLite and other SQL dialects without array support use JSON
         return sa.JSON()
 
     @property
     def kuzu(self):
-        return f"FIXED_LIST(FLOAT, {self.dim})"
+        # Map element types to Kùzu types
+        type_map = {
+            "float32": "FLOAT",
+            "float64": "DOUBLE",
+            "int8": "INT8",
+            "int16": "INT16",
+            "int32": "INT32",
+            "int64": "INT64",
+        }
+        element_kuzu = type_map.get(self.element_type, "FLOAT")
+        return f"FIXED_LIST({element_kuzu}, {self.dim})"
 
     @property
     def duckdb(self):
-        return f"FLOAT[{self.dim}]"
+        # Map element types to DuckDB types
+        type_map = {
+            "float32": "FLOAT",
+            "float64": "DOUBLE",
+            "int8": "TINYINT",
+            "int16": "SMALLINT",
+            "int32": "INTEGER",
+            "int64": "BIGINT",
+        }
+        element_duckdb = type_map.get(self.element_type, "FLOAT")
+        return f"{element_duckdb}[{self.dim}]"
 
     @property
     def arrow(self):
+        if not ARROW_AVAILABLE:
+            return None
         p = typing.cast(Any, pa)
-        return p.list_(p.float32(), self.dim) if ARROW_AVAILABLE else None
+        # Map element types to Arrow types
+        type_map = {
+            "float32": p.float32(),
+            "float64": p.float64(),
+            "int8": p.int8(),
+            "int16": p.int16(),
+            "int32": p.int32(),
+            "int64": p.int64(),
+        }
+        element_arrow = type_map.get(self.element_type, p.float32())
+        return p.list_(element_arrow, self.dim)
 
     def serialize(self, value: Any) -> Any:
         if value is None:
             return None
         if not isinstance(value, list | tuple):
-            raise TypeError("Vector value must be a list or tuple of floats")
+            raise TypeError(f"Vector value must be a list or tuple, got {type(value)}")
         if len(value) != self.dim:
             raise ValueError(f"Vector length {len(value)} does not match expected dim {self.dim}")
+
+        # Type validation and conversion for elements
+        if self.element_type.startswith("int"):
+            # For integer vectors, ensure all elements are integers
+            try:
+                return [int(x) for x in value]
+            except (ValueError, TypeError) as e:
+                raise TypeError(f"Cannot convert vector elements to {self.element_type}: {e}")
+        elif self.element_type.startswith("float"):
+            # For float vectors, ensure all elements are numbers
+            try:
+                return [float(x) for x in value]
+            except (ValueError, TypeError) as e:
+                raise TypeError(f"Cannot convert vector elements to {self.element_type}: {e}")
+
         return value
 
 
@@ -615,6 +687,129 @@ class EnumSpec(TypeSpec):
         return value.value if hasattr(value, "value") else value
 
 
+class BinarySpec(TypeSpec):
+    """Handles binary data for various formats like images, files, etc."""
+
+    @property
+    def sql(self):
+        return sa.LargeBinary if SQL_AVAILABLE else "BLOB"
+
+    @property
+    def kuzu(self):
+        return "BLOB"
+
+    @property
+    def duckdb(self):
+        return "BLOB"
+
+    @property
+    def arrow(self):
+        p = typing.cast(Any, pa)
+        return p.binary() if ARROW_AVAILABLE else None
+
+    def serialize(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            return value
+        # Convert strings to bytes if needed
+        if isinstance(value, str):
+            return value.encode("utf-8")
+        return value
+
+
+class TimeSpec(TypeSpec):
+    """Handles time values without date component."""
+
+    @property
+    def sql(self):
+        return sa.Time if SQL_AVAILABLE else "TIME"
+
+    @property
+    def kuzu(self):
+        return "TIME"
+
+    @property
+    def duckdb(self):
+        return "TIME"
+
+    @property
+    def arrow(self):
+        p = typing.cast(Any, pa)
+        return p.time64("us") if ARROW_AVAILABLE else None
+
+
+class DateOnlySpec(TypeSpec):
+    """Handles date values without time component."""
+
+    @property
+    def sql(self):
+        return sa.Date if SQL_AVAILABLE else "DATE"
+
+    @property
+    def kuzu(self):
+        return "DATE"
+
+    @property
+    def duckdb(self):
+        return "DATE"
+
+    @property
+    def arrow(self):
+        p = typing.cast(Any, pa)
+        return p.date64() if ARROW_AVAILABLE else None
+
+    def serialize(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, datetime.date):
+            return value
+        return value
+
+
+class JSONSpec(TypeSpec):
+    """Handles JSON data with proper dialect support."""
+
+    @property
+    def sql(self):
+        return sa.JSON if SQL_AVAILABLE else "JSON"
+
+    def to_sqlalchemy_type(self, dialect_name: str):
+        """Returns dialect-appropriate SQLAlchemy type for JSON."""
+        if not SQL_AVAILABLE:
+            return "JSON"
+
+        # Most modern dialects support JSON
+        if dialect_name in ["postgresql", "mysql", "mariadb", "sqlite"]:
+            return sa.JSON()
+
+        # Fallback for older databases
+        return sa.Text()
+
+    @property
+    def kuzu(self):
+        return "JSON"
+
+    @property
+    def duckdb(self):
+        return "JSON"
+
+    @property
+    def arrow(self):
+        p = typing.cast(Any, pa)
+        return p.struct([p.field("value", p.string())]) if ARROW_AVAILABLE else None
+
+    def serialize(self, value: Any) -> Any:
+        if value is None:
+            return None
+        # Convert to JSON string if needed
+        if isinstance(value, (dict, list)):
+            import json
+
+            return json.dumps(value)
+        return value
+
+
 # --- 2. The Resolver Brain (Logic) ---
 
 
@@ -680,18 +875,27 @@ class PolyResolver:
                             is_nullable = True
                     except TypeError:
                         pass
-            # Special Case: Vector (Annotated[list[float], "vector", dim])
+            # Special Case: Vector (Annotated[list[float], "vector", dim, element_type])
             # Robust check using get_origin/get_args
             origin = get_origin(base)
             args = get_args(base)
-            is_list_float = origin is list and (not args or args == (float,))
+            is_list = origin is list or base is list
 
-            if is_list_float or base is list:
+            if is_list:
                 for i, m in enumerate(meta):
                     if m == "vector" and len(meta) > i + 1:
                         dim = meta[i + 1]
                         if isinstance(dim, int):
-                            return VectorSpec(dim=dim, nullable=is_nullable, is_pk=is_pk)
+                            # Check for element type (optional)
+                            element_type = "float32"  # default
+                            if len(meta) > i + 2 and isinstance(meta[i + 2], str):
+                                element_type = meta[i + 2]
+                            return VectorSpec(
+                                dim=dim,
+                                element_type=element_type,
+                                nullable=is_nullable,
+                                is_pk=is_pk,
+                            )
             # Decimal Precision
             if base is decimal.Decimal:
                 for m in meta:
@@ -716,6 +920,14 @@ class PolyResolver:
             return UUIDSpec(nullable=is_nullable, is_pk=is_pk)
         if type_hint is datetime.datetime:
             return DateTimeSpec(nullable=is_nullable, is_pk=is_pk)
+        if type_hint is datetime.date:
+            return DateOnlySpec(nullable=is_nullable, is_pk=is_pk)
+        if type_hint is datetime.time:
+            return TimeSpec(nullable=is_nullable, is_pk=is_pk)
+        if type_hint is bytes:
+            return BinarySpec(nullable=is_nullable, is_pk=is_pk)
+        if type_hint is dict:
+            return JSONSpec(nullable=is_nullable, is_pk=is_pk)
         if type_hint is decimal.Decimal:
             return DecimalSpec(18, 3, nullable=is_nullable, is_pk=is_pk)
 
@@ -906,13 +1118,58 @@ class PolyTransporter:
 
     @property
     def arrow_schema(self) -> pa.Schema | None:
+        """Enhanced arrow schema with nullable constraints and metadata support."""
         if not ARROW_AVAILABLE:
             return None
+
         p = typing.cast(Any, pa)
-        return p.schema([v.get_arrow_field(k) for k, v in self.spec.fields.items()])
+        fields = []
+
+        for field_name, spec in self.spec.fields.items():
+            field = spec.get_arrow_field(field_name)
+            if field:
+                # Enhanced metadata support
+                metadata = {}
+
+                # Add type metadata for better interoperability
+                metadata["politipo:type"] = type(spec).__name__
+                metadata["politipo:nullable"] = str(spec.nullable)
+                if spec.is_pk:
+                    metadata["politipo:primary_key"] = "true"
+
+                # Add dimension info for vectors
+                if isinstance(spec, VectorSpec):
+                    metadata["politipo:vector_dim"] = str(spec.dim)
+                    metadata["politipo:vector_element_type"] = spec.element_type
+
+                # Add precision info for decimals
+                if isinstance(spec, DecimalSpec):
+                    metadata["politipo:decimal_precision"] = str(spec.p)
+                    metadata["politipo:decimal_scale"] = str(spec.s)
+
+                # Create new field with metadata
+                field = p.field(field_name, field.type, nullable=field.nullable, metadata=metadata)
+
+            fields.append(field)
+
+        return p.schema(fields)
+
+    def to_sql_ddl(self, table: str, dialect: str = "duckdb") -> str:
+        """
+        Enhanced SQL DDL generation with constraint support.
+        Leverages the existing generate_ddl method for consistency.
+
+        Args:
+            table: Table name for the DDL
+            dialect: SQL dialect to generate DDL for
+
+        Returns:
+            str: SQL CREATE TABLE statement
+        """
+        return self.generate_ddl(dialect, table)
 
     def generate_ddl(self, dialect: Literal["duckdb", "kuzu", "sql"] | str, table_name: str) -> str:
-        """Generates CREATE TABLE statements for infrastructure."""
+        """Generates CREATE TABLE statements for infrastructure with constraint support."""
 
         def _sanitize_ident(name: str) -> str:
             import re
@@ -922,6 +1179,35 @@ class PolyTransporter:
             if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
                 raise ValueError(f"Unsafe identifier: {name!r}")
             return name
+
+        def _extract_constraints_for_ddl(field_name: str) -> list[str]:
+            """Extract Pydantic constraints for DDL generation."""
+            constraints = []
+            field_info = self.model_cls.model_fields.get(field_name)
+
+            if not field_info:
+                return constraints
+
+            # Extract constraints from metadata
+            for meta in field_info.metadata or []:
+                if hasattr(meta, "min_length") and meta.min_length is not None:
+                    constraints.append(f"CHECK (LENGTH({field_name}) >= {meta.min_length})")
+                if hasattr(meta, "max_length") and meta.max_length is not None:
+                    constraints.append(f"CHECK (LENGTH({field_name}) <= {meta.max_length})")
+                if hasattr(meta, "gt") and meta.gt is not None:
+                    constraints.append(f"CHECK ({field_name} > {meta.gt})")
+                if hasattr(meta, "ge") and meta.ge is not None:
+                    constraints.append(f"CHECK ({field_name} >= {meta.ge})")
+                if hasattr(meta, "lt") and meta.lt is not None:
+                    constraints.append(f"CHECK ({field_name} < {meta.lt})")
+                if hasattr(meta, "le") and meta.le is not None:
+                    constraints.append(f"CHECK ({field_name} <= {meta.le})")
+                if hasattr(meta, "pattern") and meta.pattern is not None:
+                    # Escape single quotes in regex pattern for SQL
+                    escaped_pattern = meta.pattern.replace("'", "''")
+                    constraints.append(f"CHECK ({field_name} ~ '{escaped_pattern}')")
+
+            return constraints
 
         safe_table = _sanitize_ident(table_name)
 
@@ -991,8 +1277,20 @@ class PolyTransporter:
                     }
                     sa_type = type_map.get(sa_type.upper(), String())
 
+                # Add CHECK constraints from Pydantic validators
+                constraints = []
+                pydantic_constraints = _extract_constraints_for_ddl(name)
+                if pydantic_constraints:
+                    from sqlalchemy import CheckConstraint
+
+                    constraints.extend(
+                        [CheckConstraint(constraint) for constraint in pydantic_constraints]
+                    )
+
                 columns.append(
-                    Column(name, sa_type, primary_key=spec.is_pk, nullable=spec.nullable)
+                    Column(
+                        name, sa_type, primary_key=spec.is_pk, nullable=spec.nullable, *constraints
+                    )
                 )
 
             # Create virtual table
@@ -1011,10 +1309,20 @@ class PolyTransporter:
 
         # 2. DuckDB dialect
         if dialect == "duckdb":
-            cols = ", ".join(
-                f"{k} {v.duckdb}" + (" PRIMARY KEY" if v.is_pk else "")
-                for k, v in self.spec.fields.items()
-            )
+            col_defs = []
+            for k, v in self.spec.fields.items():
+                col_def = f"{k} {v.duckdb}"
+                if v.is_pk:
+                    col_def += " PRIMARY KEY"
+
+                # Add constraints from Pydantic validators
+                constraints = _extract_constraints_for_ddl(k)
+                for constraint in constraints:
+                    col_def += f" {constraint}"
+
+                col_defs.append(col_def)
+
+            cols = ", ".join(col_defs)
             return f"CREATE TABLE IF NOT EXISTS {safe_table} ({cols});"
 
         # 3. Kùzu dialect
@@ -1050,6 +1358,87 @@ class PolyTransporter:
 
         return ""
 
+    @classmethod
+    def from_model(cls, model: type[BaseModel]) -> PolyTransporter:
+        """
+        Factory method to create a PolyTransporter from a model class.
+        Provides a more explicit alternative to the constructor.
+        """
+        return cls(model)
+
+    def encode(self, instance: BaseModel) -> dict:
+        """
+        Enhanced encode method with robust error handling and nested model support.
+
+        Args:
+            instance: The Pydantic model instance to encode
+
+        Returns:
+            dict: Serialized representation with proper type conversions
+
+        Raises:
+            ValueError: If instance is not of the expected model type
+        """
+        if not isinstance(instance, self.model_cls):
+            raise ValueError(
+                f"Instance must be of type {self.model_cls.__name__}, got {type(instance).__name__}"
+            )
+
+        try:
+            # Use Pydantic's built-in serialization for basic types
+            data = instance.model_dump()
+
+            # Apply custom serialization for complex types
+            for field_name, spec in self.spec.fields.items():
+                if field_name in data and data[field_name] is not None:
+                    # Apply type-specific serialization
+                    if hasattr(spec, "serialize"):
+                        try:
+                            data[field_name] = spec.serialize(data[field_name])
+                        except Exception as e:
+                            raise ValueError(f"Failed to serialize field '{field_name}': {e}")
+
+            return data
+
+        except Exception as e:
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError(f"Failed to encode instance: {e}")
+
+    def decode(self, data: typing.Mapping[str, Any]) -> BaseModel:
+        """
+        Enhanced decode method with robust error handling and validation.
+
+        Args:
+            data: Dictionary/Mapping containing the data to decode
+
+        Returns:
+            BaseModel: Validated model instance
+
+        Raises:
+            ValueError: If data validation fails
+        """
+        if not isinstance(data, typing.Mapping):
+            raise ValueError(f"Data must be a mapping/dict, got {type(data).__name__}")
+
+        try:
+            # Pre-process data for special types if needed
+            processed_data = dict(data)
+
+            # Handle special cases for complex types
+            for field_name, spec in self.spec.fields.items():
+                if field_name in processed_data and processed_data[field_name] is not None:
+                    # Add type-specific deserialization logic here if needed
+                    # For now, we rely on Pydantic's validation
+                    pass
+
+            # Use Pydantic's model_validate for robust parsing and validation
+            return self.model_cls.model_validate(processed_data)
+
+        except Exception as e:
+            # Wrap Pydantic validation errors with more context
+            raise ValueError(f"Failed to decode data into {self.model_cls.__name__}: {e}")
+
     def to_arrow(self, objects: list[BaseModel]) -> pa.Table:
         """
         SotA Batch Serialization: Objects -> Arrow Table.
@@ -1068,7 +1457,9 @@ class PolyTransporter:
         serializers = {}
         for k, v in self.spec.fields.items():
             # We only need custom serialization for complex types
-            if isinstance(v, UUIDSpec | EnumSpec | StructSpec | ListSpec | VectorSpec):
+            if isinstance(
+                v, UUIDSpec | EnumSpec | StructSpec | ListSpec | VectorSpec | BinarySpec | JSONSpec
+            ):
                 serializers[k] = v.serialize
             else:
                 serializers[k] = None
@@ -1248,6 +1639,10 @@ __all__ = [
     "VectorSpec",
     "StructSpec",
     "EnumSpec",
+    "BinarySpec",
+    "TimeSpec",
+    "DateOnlySpec",
+    "JSONSpec",
     # Resolver & quality
     "resolve",
     "QualityGate",

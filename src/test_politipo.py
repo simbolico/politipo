@@ -1443,7 +1443,7 @@ def test_vector_spec_dialect_aware():
     with pytest.MonkeyPatch().context() as mp:
         mp.setattr(pt, "SQL_AVAILABLE", False)
         fallback_type = vector_spec.to_sqlalchemy_type("sqlite")
-        assert fallback_type == "FLOAT[]"
+        assert fallback_type == "FLOAT32[]"
 
 
 def test_generate_ddl_postgresql_vector():
