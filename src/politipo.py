@@ -280,6 +280,19 @@ class TypeSpec(abc.ABC):
     @abc.abstractmethod
     def arrow(self) -> pa.DataType | None: ...
 
+    def to_sqlalchemy_type(self, dialect_name: str) -> sa.types.TypeEngine | str:
+        """Returns the appropriate SQLAlchemy type for the given dialect."""
+        # Default implementation uses the static sql property
+        t = self.sql
+        result = t() if callable(t) else t
+
+        # Handle dialect incompatibilities for default types
+        # SQLite doesn't support ARRAY, fall back to JSON
+        if dialect_name == "sqlite" and isinstance(result, sa.ARRAY):
+            return sa.JSON()
+
+        return result
+
     def get_arrow_field(self, name: str) -> pa.Field | None:
         if not ARROW_AVAILABLE:
             return None
@@ -452,6 +465,18 @@ class ListSpec(TypeSpec):
     def sql(self):
         return sa.ARRAY(self.child.sql) if (SQL_AVAILABLE and hasattr(sa, "ARRAY")) else "JSON"
 
+    def to_sqlalchemy_type(self, dialect_name: str):
+        """Returns dialect-appropriate SQLAlchemy type for lists."""
+        if not SQL_AVAILABLE:
+            return "JSON"
+
+        # SQLite doesn't support ARRAY, fall back to JSON
+        if dialect_name == "sqlite":
+            return sa.JSON()
+
+        # PostgreSQL and other dialects support ARRAY
+        return sa.ARRAY(self.child.sql)
+
     @property
     def kuzu(self):
         return f"LIST({self.child.kuzu})"
@@ -485,6 +510,21 @@ class VectorSpec(TypeSpec):
     @property
     def sql(self):
         return sa.ARRAY(sa.Float) if SQL_AVAILABLE else "FLOAT[]"
+
+    def to_sqlalchemy_type(self, dialect_name: str):
+        """
+        Returns dialect-appropriate SQLAlchemy type for vectors.
+        PostgreSQL: ARRAY of FLOAT
+        SQLite/MySQL: JSON (no native array support)
+        """
+        if not SQL_AVAILABLE:
+            return "FLOAT[]"
+
+        if "postgres" in dialect_name:
+            return sa.ARRAY(sa.Float)
+
+        # SQLite and other SQL dialects without array support use JSON
+        return sa.JSON()
 
     @property
     def kuzu(self):
@@ -841,6 +881,29 @@ class PolyTransporter:
         if not isinstance(self.spec, StructSpec):
             raise ValueError("Root must be a Struct/Model")
 
+        # Dependency validation with warnings
+        self._validate_dependencies()
+
+    def _validate_dependencies(self):
+        """Validates presence of optional dependencies and warns if needed."""
+        # Check for high-performance types that need Arrow
+        has_vector = any(isinstance(f, VectorSpec) for f in self.spec.fields.values())
+        has_uuid_optimization = any(isinstance(f, UUIDSpec) for f in self.spec.fields.values())
+        has_enum_optimization = any(isinstance(f, EnumSpec) for f in self.spec.fields.values())
+
+        # Warn if model uses high-performance types but Arrow is missing
+        if (has_vector or has_uuid_optimization or has_enum_optimization) and not ARROW_AVAILABLE:
+            import warnings
+
+            warnings.warn(
+                f"Model {self.model_cls.__name__} uses high-performance types "
+                "(Vector/UUID/Enum dictionary encoding) but 'pyarrow' is not installed. "
+                "Serialization performance will be severely degraded or fail during export. "
+                "Install with: uv pip install '.[arrow]'",
+                UserWarning,
+                stacklevel=2,
+            )
+
     @property
     def arrow_schema(self) -> pa.Schema | None:
         if not ARROW_AVAILABLE:
@@ -861,59 +924,92 @@ class PolyTransporter:
             return name
 
         safe_table = _sanitize_ident(table_name)
-        # Optional: SQLAlchemy-backed compilation when available via
-        # dialect strings like 'sql+postgresql'
+
+        # 1. SQL dialects with SQLAlchemy compiler
         if isinstance(dialect, str) and dialect.startswith("sql+") and SQL_AVAILABLE:
             target = dialect.split("+", 1)[1]
-            try:
-                import sqlalchemy.dialects as sad
 
-                # Resolve via getattr to appease type checkers
-                def _dialect(name: str):
-                    try:
-                        mod = getattr(sad, name)
-                        return mod.dialect()
-                    except Exception:
-                        return None
+            # Use a safe fallback for unknown dialects
+            known_dialects = ["postgresql", "postgres", "sqlite", "mysql", "mariadb"]
+            if target not in known_dialects:
+                target = "sqlite"  # Safe default
 
-                # Map common aliases to SQLAlchemy dialect classes
-                dialect_map = {
-                    "postgres": _dialect("postgresql"),
-                    "postgresql": _dialect("postgresql"),
-                    "sqlite": _dialect("sqlite"),
-                    "mysql": _dialect("mysql"),
-                    "mariadb": _dialect("mysql"),
-                }
-                d = dialect_map.get(target)
-            except Exception:
-                d = None
+            # Import SQLAlchemy components
+            from sqlalchemy import Column, MetaData, Table
+            from sqlalchemy.schema import CreateTable
 
-            def compile_type(ts: TypeSpec) -> str:
-                t = ts.sql
-                # If a simple string was provided, use it
-                if isinstance(t, str):
-                    return t
-                # Instantiate callables like sa.String -> sa.String()
+            # Import specific dialect modules (if needed for future dialect-specific optimizations)
+            # try:
+            #     from sqlalchemy.dialects import mysql, postgresql, sqlite
+            # except ImportError:
+            #     postgresql = None
+            #     sqlite = None
+            #     mysql = None
+
+            # Map dialect aliases to SQLAlchemy dialect classes
+            # (currently unused, but kept for future dialect-specific optimizations)
+            # dialect_map = {
+            #     "postgres": postgresql.dialect() if postgresql else None,
+            #     "postgresql": postgresql.dialect() if postgresql else None,
+            #     "sqlite": sqlite.dialect() if sqlite else None,
+            #     "mysql": mysql.dialect() if mysql else None,
+            #     "mariadb": mysql.dialect() if mysql else None,
+            # }
+
+            # Create SQLAlchemy Table object in memory
+            metadata = MetaData()
+            columns = []
+
+            for name, spec in self.spec.fields.items():
+                # Use the new dialect-aware method with fallback
                 try:
-                    inst = t() if callable(t) else t
+                    sa_type = spec.to_sqlalchemy_type(target)
                 except Exception:
-                    inst = t
-                try:
-                    if d is not None and hasattr(inst, "compile"):
-                        return inst.compile(dialect=d)
-                except Exception:
-                    pass
-                # Fallback to duckdb type name if compilation not possible
-                return ts.duckdb
+                    # Fallback to duckdb type if to_sqlalchemy_type fails
+                    sa_type = spec.duckdb
 
-            cols = ", ".join(
-                f"{k} {compile_type(v)}" + (" PRIMARY KEY" if v.is_pk else "")
-                for k, v in self.spec.fields.items()
-            )
-            return f"CREATE TABLE IF NOT EXISTS {safe_table} ({cols});"
+                # Special case: handle SQLite ARRAY incompatibility directly
+                # This is a catch-all for any spec that might still return ARRAY
+                if target == "sqlite" and isinstance(sa_type, sa.ARRAY):
+                    sa_type = sa.JSON()
+
+                # Handle SQLAlchemy types vs string types
+                if isinstance(sa_type, str):
+                    # Convert string types to SQLAlchemy types if possible
+                    from sqlalchemy import JSON, Boolean, Float, Integer, String
+
+                    type_map = {
+                        "VARCHAR": String(),
+                        "TEXT": String(),
+                        "BIGINT": Integer(),
+                        "INT": Integer(),
+                        "FLOAT": Float(),
+                        "DOUBLE": Float(),
+                        "BOOLEAN": Boolean(),
+                        "UUID": String(),  # Fallback for UUID when not supported
+                        "JSON": JSON(),
+                    }
+                    sa_type = type_map.get(sa_type.upper(), String())
+
+                columns.append(
+                    Column(name, sa_type, primary_key=spec.is_pk, nullable=spec.nullable)
+                )
+
+            # Create virtual table
+            table = Table(safe_table, metadata, *columns)
+
+            # Create mock engine for dialect compilation
+            url_prefix = "postgresql" if "postgres" in target else target
+            mock_engine = sa.create_mock_engine(f"{url_prefix}://", executor=lambda x, y: None)
+
+            # Compile DDL safely
+            return str(CreateTable(table).compile(mock_engine)).strip()
+
+        # Fallback for SQL dialects when SQLAlchemy is not available
         elif isinstance(dialect, str) and dialect.startswith("sql+") and not SQL_AVAILABLE:
-            # Fallback to generic SQL if SQLAlchemy is not available
             dialect = "sql"
+
+        # 2. DuckDB dialect
         if dialect == "duckdb":
             cols = ", ".join(
                 f"{k} {v.duckdb}" + (" PRIMARY KEY" if v.is_pk else "")
@@ -921,6 +1017,7 @@ class PolyTransporter:
             )
             return f"CREATE TABLE IF NOT EXISTS {safe_table} ({cols});"
 
+        # 3. Kùzu dialect
         elif dialect == "kuzu":
             pk_col = None
             # 1. Explicit PK
@@ -941,6 +1038,7 @@ class PolyTransporter:
             cols = ", ".join(f"{k} {v.kuzu}" for k, v in self.spec.fields.items())
             return f"CREATE NODE TABLE {safe_table} ({cols}, PRIMARY KEY ({pk_col}));"
 
+        # 4. Generic SQL
         elif dialect == "sql":
             # Generic SQL: prefer simple portable type names
             def type_name(ts: TypeSpec) -> str:

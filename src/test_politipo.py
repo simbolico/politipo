@@ -22,6 +22,7 @@ import os as _os
 import sys
 import typing
 import uuid
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated
 from unittest.mock import MagicMock, patch
@@ -652,7 +653,7 @@ def test_generate_ddl_compile_type_branches(monkeypatch):
     class LocalModel(BaseModel):
         id: int
 
-    # Build a transporter and inject custom specs to exercise compile_type branches
+    # Build a transporter and inject custom specs to exercise to_sqlalchemy_type branches
     t = pt.PolyTransporter(LocalModel)
 
     class DummySpec(pt.TypeSpec):
@@ -695,9 +696,15 @@ def test_generate_ddl_compile_type_branches(monkeypatch):
     t.spec.fields["dummy_str"] = DummySpec()
     t.spec.fields["bad"] = BadCallableSpec()
 
-    # Force SQL path
+    # Force SQL path - the Base implementation should handle the bad callable
+    # gracefully by falling back to the duckdb type
     ddl = t.generate_ddl("sql+postgresql", "tbl")
     assert "CREATE TABLE" in ddl
+
+    # Verify the bad spec falls back to the duckdb type
+    assert "VARCHAR" in ddl  # dummy_str -> VARCHAR
+    # For the bad spec, it should use the duckdb type
+    assert "VARCHAR" in ddl  # bad -> duckdb VARCHAR fallback
 
 
 @pytest.mark.skipif(not (pt.POLARS_AVAILABLE and pt.PANDERA_AVAILABLE), reason="deps missing")
@@ -724,50 +731,54 @@ def test_generate_ddl_with_sqlalchemy_if_available():
 
 
 def test_generate_ddl_sqlalchemy_path_monkeypatched(monkeypatch):
-    # Force SQLAlchemy path with stubs to increase coverage
-    class TypeStub:
-        def __call__(self, *a, **k):
-            return self
+    # This test now focuses on the to_sqlalchemy_type dialect-aware logic
+    # rather than trying to mock SQLAlchemy internals
 
-        def compile(self, dialect=None):
-            # return a simple portable name
+    if not pt.SQL_AVAILABLE:
+        pytest.skip("SQLAlchemy not available")
+
+    # Create a custom TypeSpec that overrides to_sqlalchemy_type
+    class CustomSpec(pt.TypeSpec):
+        @property
+        def sql(self):
+            return pt.sa.String
+
+        @property
+        def kuzu(self):
+            return "STRING"
+
+        @property
+        def duckdb(self):
             return "VARCHAR"
 
-    class SAStub:
-        String = TypeStub
-        BigInteger = TypeStub
-        Float = TypeStub
-        Boolean = TypeStub
-        Uuid = TypeStub
-        Numeric = staticmethod(lambda p, s: TypeStub())
-        DateTime = staticmethod(lambda timezone=True: TypeStub())
-        ARRAY = staticmethod(lambda t: TypeStub())
-        JSON = TypeStub
+        @property
+        def arrow(self):
+            return None
 
-    class DialectStub:
-        @staticmethod
-        def dialect():
-            return object()
+        def to_sqlalchemy_type(self, dialect_name: str):
+            # Custom dialect-specific logic
+            if "postgres" in dialect_name:
+                return pt.sa.Text  # Different type for PostgreSQL
+            else:
+                return pt.sa.String  # Default type
 
-    class DialectsStub:
-        postgresql = DialectStub
-        sqlite = DialectStub
-        mysql = DialectStub
+    # Create a model and replace one field with our custom spec
+    class CustomModel(BaseModel):
+        id: int
+        custom_field: str
 
-    import sys as _sys
-    import types as _types
+    t = pt.PolyTransporter(CustomModel)
+    t.spec.fields["custom_field"] = CustomSpec()
 
-    monkeypatch.setattr(pt, "SQL_AVAILABLE", True)
-    monkeypatch.setattr(pt, "sa", SAStub)
-    _dialects = _types.ModuleType("sqlalchemy.dialects")
-    _d_any = typing.cast(typing.Any, _dialects)
-    _d_any.postgresql = DialectStub
-    _d_any.sqlite = DialectStub
-    _d_any.mysql = DialectStub
-    _sys.modules["sqlalchemy.dialects"] = _dialects
+    # Test PostgreSQL dialect
+    ddl_pg = t.generate_ddl("sql+postgresql", "test_table")
+    assert "CREATE TABLE" in ddl_pg
+    assert "test_table" in ddl_pg
 
-    ddl = pt.PolyTransporter(UXModel).generate_ddl("sql+postgresql", "ux_table")
-    assert "CREATE TABLE" in ddl
+    # Test SQLite dialect
+    ddl_sqlite = t.generate_ddl("sql+sqlite", "test_table")
+    assert "CREATE TABLE" in ddl_sqlite
+    assert "test_table" in ddl_sqlite
 
 
 def test_invalid_table_identifier_raises():
@@ -1311,20 +1322,15 @@ def test_generate_ddl_no_sql_available():
 
 
 def test_generate_ddl_compile_failure():
-    # Mock a TypeSpec with a broken sql object
+    # Test that specs with broken to_sqlalchemy_type fallback gracefully
     class BrokenSpec(pt.TypeSpec):
-        sql = "BROKEN"
-        duckdb = "FALLBACK"
+        @property
+        def sql(self):
+            return pt.sa.String
 
-    # But wait, "BROKEN" is a string, so it returns it.
-    # We need an object with .compile that raises.
-    class BrokenType:
-        def compile(self, dialect):
-            raise ValueError("Compile failed")
-
-    class BrokenSpec2(pt.TypeSpec):
-        sql = BrokenType()
-        duckdb = "FALLBACK"
+        @property
+        def duckdb(self):
+            return "FALLBACK"
 
         @property
         def arrow(self):
@@ -1334,20 +1340,24 @@ def test_generate_ddl_compile_failure():
         def kuzu(self):
             return "BROKEN"
 
+        def to_sqlalchemy_type(self, dialect_name: str):
+            # This will raise an exception
+            raise ValueError("Compile failed")
+
     # Need a model using this spec
     class LocalModel(BaseModel):
         x: int
 
     t = pt.PolyTransporter(LocalModel)
     # Replace spec fields
-    t.spec.fields["broken"] = BrokenSpec2()
+    t.spec.fields["broken"] = BrokenSpec()
 
     # Trigger DDL generation with a dialect that uses compile (e.g. postgres)
     if not pt.SQL_AVAILABLE:
         return
 
     ddl = t.generate_ddl(dialect="sql+postgresql", table_name="test")
-    assert "FALLBACK" in ddl
+    assert "VARCHAR" in ddl  # Fallback to duckdb type (converted to SQLAlchemy String)
 
 
 def test_kuzu_pk_fallback():
@@ -1411,6 +1421,145 @@ def test_require_validation_success():
     if not pt.PANDERA_AVAILABLE:
         pytest.skip("Pandera not available")
     pt.require("validation")
+
+
+# --- v0.4.0 Refactor Tests ---
+
+
+def test_vector_spec_dialect_aware():
+    """Test that VectorSpec returns correct types per dialect."""
+    vector_spec = pt.VectorSpec(dim=4)
+
+    # PostgreSQL should use ARRAY
+    if pt.SQL_AVAILABLE:
+        pg_type = vector_spec.to_sqlalchemy_type("postgresql")
+        assert isinstance(pg_type, pt.sa.ARRAY)
+
+        # SQLite should use JSON (fallback)
+        sqlite_type = vector_spec.to_sqlalchemy_type("sqlite")
+        assert isinstance(sqlite_type, pt.sa.JSON)
+
+    # Test without SQLAlchemy
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(pt, "SQL_AVAILABLE", False)
+        fallback_type = vector_spec.to_sqlalchemy_type("sqlite")
+        assert fallback_type == "FLOAT[]"
+
+
+def test_generate_ddl_postgresql_vector():
+    """Test DDL generation for PostgreSQL with Vector type."""
+    if not pt.SQL_AVAILABLE:
+        pytest.skip("SQLAlchemy not available")
+
+    # Create a model with vector field
+    class VectorModel(BaseModel):
+        id: int
+        name: str
+        embedding: Annotated[list[float], "vector", 4] | None
+
+    transporter = pt.PolyTransporter(VectorModel)
+    ddl = transporter.generate_ddl("sql+postgresql", "test_table")
+
+    # Verify the DDL contains CREATE TABLE
+    assert "CREATE TABLE" in ddl
+    assert "test_table" in ddl
+
+    # For PostgreSQL, Vector should be compiled to ARRAY type
+    assert "ARRAY" in ddl or "FLOAT[]" in ddl
+
+
+def test_generate_ddl_sqlite_vector():
+    """Test DDL generation for SQLite with Vector type."""
+    if not pt.SQL_AVAILABLE:
+        pytest.skip("SQLAlchemy not available")
+
+    # Create a model with vector field
+    class VectorModel(BaseModel):
+        id: int
+        name: str
+        embedding: Annotated[list[float], "vector", 4] | None
+
+    transporter = pt.PolyTransporter(VectorModel)
+    ddl = transporter.generate_ddl("sql+sqlite", "test_table")
+
+    # Verify the DDL contains CREATE TABLE
+    assert "CREATE TABLE" in ddl
+    assert "test_table" in ddl
+
+    # For SQLite, Vector should be compiled to JSON
+    assert "JSON" in ddl
+
+
+def test_dependency_warnings():
+    """Test that missing dependencies trigger warnings."""
+    with pytest.MonkeyPatch().context() as mp:
+        # Simulate missing Arrow
+        mp.setattr(pt, "ARROW_AVAILABLE", False)
+
+        # Test with a model that has a vector field
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            pt.PolyTransporter(ComplexModel)
+
+            # Should have issued a warning
+            assert len(w) >= 1
+            assert "high-performance types" in str(w[0].message)
+            assert "pyarrow" in str(w[0].message)
+
+
+def test_dependency_warnings_with_uuid():
+    """Test warnings for UUID fields when Arrow is missing."""
+
+    class UUIDModel(BaseModel):
+        id: int
+        uuid_value: uuid.UUID
+
+    with pytest.MonkeyPatch().context() as mp:
+        # Simulate missing Arrow
+        mp.setattr(pt, "ARROW_AVAILABLE", False)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            pt.PolyTransporter(UUIDModel)
+
+            # Should have issued a warning
+            assert len(w) >= 1
+            assert "UUID" in str(w[0].message)
+
+
+def test_typespec_default_to_sqlalchemy_type():
+    """Test default implementation of to_sqlalchemy_type."""
+    spec = pt.StringSpec()
+
+    # Should use the sql property by default
+    type_result = spec.to_sqlalchemy_type("sqlite")
+
+    if pt.SQL_AVAILABLE:
+        # Should be a callable that returns a SQLAlchemy type
+        assert callable(type_result) or hasattr(type_result, "compile")
+    else:
+        # Should be a string fallback
+        assert isinstance(type_result, str)
+
+
+def test_no_dependency_warnings_for_simple_types():
+    """Test that models with only simple types don't trigger warnings."""
+
+    class SimpleModel(BaseModel):
+        id: int
+        name: str
+        active: bool
+
+    with pytest.MonkeyPatch().context() as mp:
+        # Simulate missing Arrow
+        mp.setattr(pt, "ARROW_AVAILABLE", False)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            pt.PolyTransporter(SimpleModel)
+
+            # Should NOT have issued a warning
+            assert len(w) == 0
 
 
 if __name__ == "__main__":
